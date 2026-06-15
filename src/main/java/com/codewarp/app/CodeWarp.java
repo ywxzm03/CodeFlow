@@ -6,6 +6,9 @@ import com.codewarp.core.QueryEngine;
 import com.codewarp.llm.AnthropicClient;
 import com.codewarp.llm.LLMClient;
 import com.codewarp.tools.BashTool;
+import com.codewarp.tools.EditTool;
+import com.codewarp.tools.GlobTool;
+import com.codewarp.tools.GrepTool;
 import com.codewarp.tools.ReadTool;
 import com.codewarp.tools.Tool;
 import com.codewarp.tools.WriteTool;
@@ -68,7 +71,10 @@ public class CodeWarp {
         List<Tool> tools = List.of(
                 new ReadTool(),
                 new WriteTool(),
-                new BashTool()
+                new EditTool(),
+                new BashTool(),
+                new GrepTool(),
+                new GlobTool()
         );
 
         QueryEngine queryEngine = new QueryEngine(llmClient, tools, settings.maxIterations());
@@ -80,7 +86,7 @@ public class CodeWarp {
     private static void startCLI(QueryEngine queryEngine) {
         Scanner scanner = new Scanner(System.in);
 
-        System.out.println("\n可用工具: Read, Write, Bash");
+        System.out.println("\n可用工具: Read, Write, Edit, Bash, Grep, Glob");
         System.out.println("输入 'exit' 退出程序\n");
 
         while (true) {
