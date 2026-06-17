@@ -11,7 +11,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 编辑文件工具 - 精确替换文件中的代码片段
+ * 编辑文件工具：精确字符串替换。
+ * 默认要求 old_string 在文件中唯一（否则报错），replace_all 时替换全部。
+ * 有副作用，非并发安全——作为执行屏障串行执行。
  */
 public class EditTool implements Tool {
 
@@ -20,6 +22,11 @@ public class EditTool implements Tool {
     @Override
     public String name() {
         return "Edit";
+    }
+
+    @Override
+    public boolean isConcurrencySafe() {
+        return false;  // Edit 修改文件，不能并发
     }
 
     @Override

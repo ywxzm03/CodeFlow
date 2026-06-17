@@ -8,7 +8,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * 写入文件工具
+ * 写入文件工具：覆盖写入（不存在则创建，含父目录）。
+ * 有副作用，非并发安全——作为执行屏障串行执行。
  */
 public class WriteTool implements Tool {
 
@@ -17,6 +18,11 @@ public class WriteTool implements Tool {
     @Override
     public String name() {
         return "Write";
+    }
+
+    @Override
+    public boolean isConcurrencySafe() {
+        return false;  // Write 修改文件，不能并发
     }
 
     @Override

@@ -41,12 +41,17 @@ public class CodeWarp {
                 System.err.println("\n示例配置:");
                 System.err.println("""
                         {
-                          "api_key": "your-api-key-here",
+                          "api_key": "sk-ant-...",
                           "base_url": "https://api.anthropic.com/v1/messages",
                           "model": "claude-opus-4-20250514",
                           "max_tokens": 8192,
                           "max_iterations": 25
                         }
+
+                        支持 Anthropic Messages 协议的端点：
+                        - Anthropic: https://api.anthropic.com/v1/messages
+                        - DeepSeek Anthropic 兼容端点: https://api.deepseek.com/anthropic/v1/messages
+                        - GLM Anthropic 兼容端点: 按厂商文档填写 /v1/messages 端点
                         """);
                 System.exit(1);
             }
@@ -60,7 +65,7 @@ public class CodeWarp {
             return;
         }
 
-        // 初始化组件
+        // 初始化组件（使用 Anthropic Messages API）
         LLMClient llmClient = new AnthropicClient(
                 settings.apiKey(),
                 settings.baseUrl(),

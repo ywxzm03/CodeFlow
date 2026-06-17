@@ -11,6 +11,9 @@ repositories {
 }
 
 dependencies {
+    // Anthropic 官方 Java SDK（Messages API raw stream，用于 Claude Code 风格的流式工具调用）
+    implementation("com.anthropic:anthropic-java:2.40.1")
+
     // Jackson for JSON processing
     implementation("com.fasterxml.jackson.core:jackson-databind:2.17.0")
 

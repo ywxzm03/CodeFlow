@@ -29,6 +29,15 @@ public interface Tool {
     ToolExecutionResult execute(String input);
 
     /**
+     * 工具是否并发安全
+     *
+     * @return true 表示可以与其他并发安全工具并行执行，false 表示必须独占执行
+     */
+    default boolean isConcurrencySafe() {
+        return false;  // 默认不安全，子类可以覆盖
+    }
+
+    /**
      * 工具执行结果
      */
     record ToolExecutionResult(String content, boolean isError) {

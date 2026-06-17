@@ -4,11 +4,15 @@ import com.codewarp.llm.LLMClient;
 import com.codewarp.tools.Tool;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
-import java.util.UUID;
+import java.util.Map;
 
 /**
  * 查询引擎 - 实现"用户输入 → LLM调用 → 工具调用"的主循环
+ *
+ * 支持流式工具执行：边接收 LLM 响应边执行工具
  */
 public class QueryEngine {
 
@@ -48,44 +52,13 @@ public class QueryEngine {
         while (iteration < maxIterations) {
             iteration++;
 
-            // 1. 调用LLM
             System.out.println("\n[Iteration " + iteration + "] 调用LLM...");
-            LLMClient.LLMResponse response = llmClient.call(SYSTEM_PROMPT, messages, tools);
 
-            // 2. 输出LLM的文本响应
-            if (response.content() != null && !response.content().isEmpty()) {
-                System.out.println("[LLM响应] " + response.content());
+            // 流式执行模式
+            QueryResult result = executeStreamingIteration(messages, iteration);
+            if (result != null) {
+                return result;
             }
-
-            // 3. 添加助手消息
-            messages.add(new Message.Assistant(response.content(), response.toolUses()));
-
-            // 4. 检查是否有工具调用
-            if (!response.hasToolUses()) {
-                // 没有工具调用，循环结束
-                System.out.println("\n[完成] 没有更多工具调用，对话结束");
-                return new QueryResult(
-                    response.content(),
-                    messages,
-                    iteration,
-                    QueryResult.StopReason.COMPLETED
-                );
-            }
-
-            // 5. 执行工具
-            System.out.println("\n[工具执行] 执行 " + response.toolUses().size() + " 个工具...");
-            for (Message.ToolUse toolUse : response.toolUses()) {
-                Tool.ToolExecutionResult result = executeTool(toolUse);
-
-                // 添加工具结果到消息列表
-                messages.add(new Message.ToolResult(
-                    toolUse.id(),
-                    result.content(),
-                    result.isError()
-                ));
-            }
-
-            // 6. 继续下一轮循环
         }
 
         // 达到最大迭代次数
@@ -99,39 +72,82 @@ public class QueryEngine {
     }
 
     /**
-     * 执行单个工具
+     * 流式执行模式的迭代
      */
-    private Tool.ToolExecutionResult executeTool(Message.ToolUse toolUse) {
-        System.out.println("  - 工具: " + toolUse.name() + " (id: " + toolUse.id() + ")");
+    private QueryResult executeStreamingIteration(List<Message> messages, int iteration) {
+        // 创建流式工具执行器
+        StreamingToolExecutor executor = new StreamingToolExecutor(tools);
 
-        // 查找工具
-        Tool tool = tools.stream()
-                .filter(t -> t.name().equals(toolUse.name()))
-                .findFirst()
-                .orElse(null);
-
-        if (tool == null) {
-            String error = "未找到工具: " + toolUse.name();
-            System.out.println("    [错误] " + error);
-            return Tool.ToolExecutionResult.error(error);
-        }
-
-        // 执行工具
         try {
-            Tool.ToolExecutionResult result = tool.execute(toolUse.input());
-            System.out.println("    [结果] " + truncate(result.content(), 100));
-            return result;
-        } catch (Exception e) {
-            String error = "工具执行失败: " + e.getMessage();
-            System.out.println("    [错误] " + error);
-            return Tool.ToolExecutionResult.error(error);
-        }
-    }
+            StringBuilder contentBuilder = new StringBuilder();
+            List<Message.ToolUse> allToolUses = new ArrayList<>();
 
-    private String truncate(String str, int maxLength) {
-        if (str == null) return "null";
-        if (str.length() <= maxLength) return str;
-        return str.substring(0, maxLength) + "...";
+
+            try {
+                Iterator<LLMClient.StreamEvent> stream = llmClient.callStreaming(
+                    SYSTEM_PROMPT,
+                    messages,
+                    tools
+                );
+
+                while (stream.hasNext()) {
+                    LLMClient.StreamEvent event = stream.next();
+
+                    switch (event) {
+                        case LLMClient.StreamEvent.TextDelta delta -> contentBuilder.append(delta.text());
+                        case LLMClient.StreamEvent.ToolUse toolUse -> {
+                            Message.ToolUse tu = toolUse.toolUse();
+                            allToolUses.add(tu);
+                            System.out.println("  [入队] " + tu.name() + " (id: " + tu.id() + ")");
+                            executor.addTool(tu);
+                        }
+                    }
+                }
+            } catch (RuntimeException streamError) {
+                // 流式中断：取消已启动的工具，丢弃本轮所有副作用，不写入半截消息
+                executor.discard();
+                System.out.println("\n[错误] 流式中断，已丢弃本轮工具执行: " + streamError.getMessage());
+                return new QueryResult(
+                    "流式调用失败: " + streamError.getMessage(),
+                    messages,
+                    iteration,
+                    QueryResult.StopReason.ERROR
+                );
+            }
+
+            String content = contentBuilder.toString();
+            if (!content.isEmpty()) {
+                System.out.println("[LLM响应] " + content);
+            }
+
+            // 先添加 assistant 消息（含全部 tool_use），保证 tool result 跟在它之后
+            messages.add(new Message.Assistant(content, allToolUses));
+
+            // 没有工具调用 -> 对话结束
+            if (allToolUses.isEmpty()) {
+                System.out.println("\n[完成] 没有更多工具调用，对话结束");
+                return new QueryResult(content, messages, iteration, QueryResult.StopReason.COMPLETED);
+            }
+
+            // 等待所有工具完成，按 tool_use 的原始顺序回填结果
+            System.out.println("\n[等待] 等待工具完成...");
+            Map<String, StreamingToolExecutor.ToolResult> resultsById = new HashMap<>();
+            for (StreamingToolExecutor.ToolResult result : executor.getRemainingResults()) {
+                resultsById.put(result.toolUseId(), result);
+            }
+            for (Message.ToolUse tu : allToolUses) {
+                StreamingToolExecutor.ToolResult result = resultsById.get(tu.id());
+                if (result != null) {
+                    messages.add(new Message.ToolResult(result.toolUseId(), result.content(), result.isError()));
+                }
+            }
+
+            // 继续下一轮
+            return null;
+
+        } finally {
+            executor.shutdown();
+        }
     }
 
     /**

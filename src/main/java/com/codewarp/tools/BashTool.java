@@ -8,7 +8,9 @@ import java.io.InputStreamReader;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 执行Shell命令工具
+ * 执行 Shell 命令工具。
+ * 有副作用，非并发安全——作为执行屏障串行执行；失败时会触发后续工具取消（依赖链已断）。
+ * execute 响应线程中断：被取消时销毁子进程，避免命令在被放弃后继续运行。
  */
 public class BashTool implements Tool {
 
@@ -18,6 +20,11 @@ public class BashTool implements Tool {
     @Override
     public String name() {
         return "Bash";
+    }
+
+    @Override
+    public boolean isConcurrencySafe() {
+        return false;  // Bash 执行命令，可能有依赖关系，不能并发
     }
 
     @Override
@@ -43,6 +50,7 @@ public class BashTool implements Tool {
 
     @Override
     public ToolExecutionResult execute(String input) {
+        Process process = null;
         try {
             // 解析输入
             JsonNode inputNode = objectMapper.readTree(input);
@@ -52,7 +60,7 @@ public class BashTool implements Tool {
             ProcessBuilder processBuilder = new ProcessBuilder("/bin/bash", "-c", command);
             processBuilder.redirectErrorStream(true);
 
-            Process process = processBuilder.start();
+            process = processBuilder.start();
 
             // 读取输出
             StringBuilder output = new StringBuilder();
@@ -60,6 +68,11 @@ public class BashTool implements Tool {
                     new InputStreamReader(process.getInputStream()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
+                    // 响应中断（如 sibling Bash 失败触发的取消）：销毁子进程并退出
+                    if (Thread.currentThread().isInterrupted()) {
+                        process.destroyForcibly();
+                        return ToolExecutionResult.error("命令被取消");
+                    }
                     output.append(line).append("\n");
                 }
             }
@@ -86,7 +99,17 @@ public class BashTool implements Tool {
 
             return ToolExecutionResult.success(result);
 
+        } catch (InterruptedException e) {
+            // waitFor 被中断：销毁子进程，恢复中断状态
+            if (process != null) {
+                process.destroyForcibly();
+            }
+            Thread.currentThread().interrupt();
+            return ToolExecutionResult.error("命令被取消");
         } catch (Exception e) {
+            if (process != null) {
+                process.destroyForcibly();
+            }
             return ToolExecutionResult.error("执行命令失败: " + e.getMessage());
         }
     }

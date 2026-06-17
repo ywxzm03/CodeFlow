@@ -8,7 +8,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * 读取文件工具
+ * 读取文件工具。
+ * 只读、并发安全——可与其他只读工具并行执行。
  */
 public class ReadTool implements Tool {
 
@@ -17,6 +18,11 @@ public class ReadTool implements Tool {
     @Override
     public String name() {
         return "Read";
+    }
+
+    @Override
+    public boolean isConcurrencySafe() {
+        return true;  // Read 只读操作，并发安全
     }
 
     @Override

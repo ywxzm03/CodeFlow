@@ -11,7 +11,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * 文件查找工具 - 使用 glob 模式查找文件
+ * 文件查找工具：使用 glob 模式查找文件。
+ * 只读、并发安全——可与其他只读工具并行执行。
  */
 public class GlobTool implements Tool {
 
@@ -20,6 +21,11 @@ public class GlobTool implements Tool {
     @Override
     public String name() {
         return "Glob";
+    }
+
+    @Override
+    public boolean isConcurrencySafe() {
+        return true;  // Glob 只读操作，并发安全
     }
 
     @Override

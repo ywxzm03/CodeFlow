@@ -12,7 +12,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 代码搜索工具 - 在文件中搜索匹配的内容
+ * 代码搜索工具：在文件中搜索匹配的内容。
+ * 只读、并发安全——可与其他只读工具并行执行。
  */
 public class GrepTool implements Tool {
 
@@ -21,6 +22,11 @@ public class GrepTool implements Tool {
     @Override
     public String name() {
         return "Grep";
+    }
+
+    @Override
+    public boolean isConcurrencySafe() {
+        return true;  // Grep 只读操作，并发安全
     }
 
     @Override
