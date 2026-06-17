@@ -23,15 +23,13 @@ import com.anthropic.models.messages.ToolUseBlockParam;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NoSuchElementException;
 
 /**
  * Anthropic Messages API 客户端（基于官方 Anthropic Java SDK）。
@@ -84,136 +82,115 @@ public class AnthropicClient implements LLMClient {
     }
 
     @Override
-    public Iterator<StreamEvent> callStreaming(String systemPrompt, List<com.codewarp.core.Message> messages, List<com.codewarp.tools.Tool> tools) {
+    public Flux<StreamEvent> callStreaming(String systemPrompt, List<com.codewarp.core.Message> messages, List<com.codewarp.tools.Tool> tools) {
         MessageCreateParams params = buildParams(systemPrompt, messages, tools);
-        StreamResponse<RawMessageStreamEvent> streamResponse = client.messages().createStreaming(params);
-        Iterator<RawMessageStreamEvent> stream = streamResponse.stream().iterator();
-
-        // 把 SDK 的 push 式 raw 事件流适配成上层的 pull 式 StreamEvent 迭代器。
-        // 难点：SDK 事件与 StreamEvent 不是一对一——很多事件（工具参数分片、message 级事件）
-        // 产出 0 个 StreamEvent，而 Iterator.next() 必须返回一个元素。
-        // 解法：pending 队列做缓冲，fill() 不断拉取 SDK 事件直到攒出至少一个 StreamEvent 或流结束。
-        return new Iterator<>() {
-            // 已就绪、待 next() 取走的事件
-            private final Deque<StreamEvent> pending = new ArrayDeque<>();
+        return Flux.create(sink -> {
+            StreamResponse<RawMessageStreamEvent> streamResponse = client.messages().createStreaming(params);
             // 按 content block 索引累积状态（文本块的类型、工具块的 id/name/分片参数）
-            private final Map<Long, BlockAccumulator> contentBlocks = new LinkedHashMap<>();
-            private boolean streamClosed = false;
+            Map<Long, BlockAccumulator> contentBlocks = new LinkedHashMap<>();
+            sink.onDispose(streamResponse::close);
 
-            @Override
-            public boolean hasNext() {
-                fill();
-                return !pending.isEmpty();
+            try {
+                // Reactor push 模式：过滤 raw event、累积 block 状态、可产出时直接 sink.next(...)。
+                // 不再需要 pending/fill，因为没有 Iterator.hasNext() 的预取语义。
+                streamResponse.stream().forEach(event -> processStreamEvent(event, contentBlocks, sink));
+                sink.complete();
+            } catch (RuntimeException e) {
+                sink.error(e);
+            } finally {
+                streamResponse.close();
             }
+        });
+    }
 
-            @Override
-            public StreamEvent next() {
-                fill();
-                if (pending.isEmpty()) {
-                    throw new NoSuchElementException();
-                }
-                return pending.poll();
+    /** 只关心三类 content_block 事件，其余（message_start/delta/stop、ping）忽略。 */
+    private void processStreamEvent(
+            RawMessageStreamEvent event,
+            Map<Long, BlockAccumulator> contentBlocks,
+            FluxSink<StreamEvent> sink
+    ) {
+        if (event.isContentBlockStart()) {
+            handleContentBlockStart(event.asContentBlockStart(), contentBlocks, sink);
+        } else if (event.isContentBlockDelta()) {
+            handleContentBlockDelta(event.asContentBlockDelta(), contentBlocks, sink);
+        } else if (event.isContentBlockStop()) {
+            handleContentBlockStop(event.asContentBlockStop(), contentBlocks, sink);
+        }
+    }
+
+    /**
+     * 块开始：工具块只记下 id/name 待后续拼参数；文本块若自带初始文本则立即发出。
+     */
+    private void handleContentBlockStart(
+            RawContentBlockStartEvent event,
+            Map<Long, BlockAccumulator> contentBlocks,
+            FluxSink<StreamEvent> sink
+    ) {
+        RawContentBlockStartEvent.ContentBlock block = event.contentBlock();
+        long index = event.index();
+
+        if (block.isToolUse()) {
+            ToolUseBlock toolUse = block.asToolUse();
+            contentBlocks.put(index, new BlockAccumulator(
+                    BlockType.TOOL_USE,
+                    toolUse.id(),
+                    toolUse.name()
+            ));
+        } else if (block.isText()) {
+            contentBlocks.put(index, new BlockAccumulator(BlockType.TEXT, null, null));
+            String text = block.asText().text();
+            if (!text.isEmpty()) {
+                sink.next(new StreamEvent.TextDelta(text));
             }
+        } else {
+            contentBlocks.put(index, new BlockAccumulator(BlockType.OTHER, null, null));
+        }
+    }
 
-            /**
-             * 把底层 Anthropic 的原始流事件，尽量转换成上层 StreamEvent，塞进 pending 队列
-             */
-            private void fill() {
-                while (pending.isEmpty() && !streamClosed) {
-                    try {
-                        if (stream.hasNext()) {
-                            processEvent(stream.next());
-                        } else {
-                            closeStream();
-                        }
-                    } catch (RuntimeException e) {
-                        closeStream();
-                        throw e;
-                    }
-                }
+    /**
+     * 块增量：文本增量即时发出（逐字流式）；工具的 input_json 分片追加到累积器，暂不发出。
+     */
+    private void handleContentBlockDelta(
+            RawContentBlockDeltaEvent event,
+            Map<Long, BlockAccumulator> contentBlocks,
+            FluxSink<StreamEvent> sink
+    ) {
+        BlockAccumulator block = contentBlocks.get(event.index());
+        if (block == null) {
+            return;
+        }
+
+        RawContentBlockDelta delta = event.delta();
+        if (delta.isText()) {
+            TextDelta textDelta = delta.asText();
+            String text = textDelta.text();
+            if (!text.isEmpty()) {
+                sink.next(new StreamEvent.TextDelta(text));
             }
+        } else if (delta.isInputJson() && block.type == BlockType.TOOL_USE) {
+            InputJsonDelta inputDelta = delta.asInputJson();
+            block.input.append(inputDelta.partialJson());
+        }
+    }
 
-            /** 只关心三类 content_block 事件，其余（message_start/delta/stop、ping）忽略。 */
-            private void processEvent(RawMessageStreamEvent event) {
-                if (event.isContentBlockStart()) {
-                    handleContentBlockStart(event.asContentBlockStart());
-                } else if (event.isContentBlockDelta()) {
-                    handleContentBlockDelta(event.asContentBlockDelta());
-                } else if (event.isContentBlockStop()) {
-                    handleContentBlockStop(event.asContentBlockStop());
-                }
-            }
+    /**
+     * 块结束：工具块此刻参数已拼完整，发出完整的 ToolUse 事件（文本块无需处理）。
+     */
+    private void handleContentBlockStop(
+            RawContentBlockStopEvent event,
+            Map<Long, BlockAccumulator> contentBlocks,
+            FluxSink<StreamEvent> sink
+    ) {
+        BlockAccumulator block = contentBlocks.get(event.index());
+        if (block == null || block.type != BlockType.TOOL_USE) {
+            return;
+        }
 
-            /**
-             * 块开始：工具块只记下 id/name 待后续拼参数；文本块若自带初始文本则立即发出。
-             */
-            private void handleContentBlockStart(RawContentBlockStartEvent event) {
-                RawContentBlockStartEvent.ContentBlock block = event.contentBlock();
-                long index = event.index();
-
-                if (block.isToolUse()) {
-                    ToolUseBlock toolUse = block.asToolUse();
-                    contentBlocks.put(index, new BlockAccumulator(
-                            BlockType.TOOL_USE,
-                            toolUse.id(),
-                            toolUse.name()
-                    ));
-                } else if (block.isText()) {
-                    contentBlocks.put(index, new BlockAccumulator(BlockType.TEXT, null, null));
-                    String text = block.asText().text();
-                    if (!text.isEmpty()) {
-                        pending.add(new StreamEvent.TextDelta(text));
-                    }
-                } else {
-                    contentBlocks.put(index, new BlockAccumulator(BlockType.OTHER, null, null));
-                }
-            }
-
-            /**
-             * 块增量：文本增量即时发出（逐字流式）；工具的 input_json 分片追加到累积器，暂不发出。
-             */
-            private void handleContentBlockDelta(RawContentBlockDeltaEvent event) {
-                BlockAccumulator block = contentBlocks.get(event.index());
-                if (block == null) {
-                    return;
-                }
-
-                RawContentBlockDelta delta = event.delta();
-                if (delta.isText()) {
-                    TextDelta textDelta = delta.asText();
-                    String text = textDelta.text();
-                    if (!text.isEmpty()) {
-                        pending.add(new StreamEvent.TextDelta(text));
-                    }
-                } else if (delta.isInputJson() && block.type == BlockType.TOOL_USE) {
-                    InputJsonDelta inputDelta = delta.asInputJson();
-                    block.input.append(inputDelta.partialJson());
-                }
-            }
-
-            /**
-             * 块结束：工具块此刻参数已拼完整，发出完整的 ToolUse 事件（文本块无需处理）。
-             */
-            private void handleContentBlockStop(RawContentBlockStopEvent event) {
-                BlockAccumulator block = contentBlocks.get(event.index());
-                if (block == null || block.type != BlockType.TOOL_USE) {
-                    return;
-                }
-
-                pending.add(new StreamEvent.ToolUse(new com.codewarp.core.Message.ToolUse(
-                        block.id,
-                        block.name,
-                        block.input.toString()
-                )));
-            }
-
-            private void closeStream() {
-                if (!streamClosed) {
-                    streamClosed = true;
-                    streamResponse.close();
-                }
-            }
-        };
+        sink.next(new StreamEvent.ToolUse(new com.codewarp.core.Message.ToolUse(
+                block.id,
+                block.name,
+                block.input.toString()
+        )));
     }
 
     /**

@@ -5,7 +5,6 @@ import com.codewarp.tools.Tool;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -84,25 +83,19 @@ public class QueryEngine {
 
 
             try {
-                Iterator<LLMClient.StreamEvent> stream = llmClient.callStreaming(
-                    SYSTEM_PROMPT,
-                    messages,
-                    tools
-                );
-
-                while (stream.hasNext()) {
-                    LLMClient.StreamEvent event = stream.next();
-
-                    switch (event) {
-                        case LLMClient.StreamEvent.TextDelta delta -> contentBuilder.append(delta.text());
-                        case LLMClient.StreamEvent.ToolUse toolUse -> {
-                            Message.ToolUse tu = toolUse.toolUse();
-                            allToolUses.add(tu);
-                            System.out.println("  [入队] " + tu.name() + " (id: " + tu.id() + ")");
-                            executor.addTool(tu);
-                        }
-                    }
-                }
+                llmClient.callStreaming(SYSTEM_PROMPT, messages, tools)
+                        .doOnNext(event -> {
+                            switch (event) {
+                                case LLMClient.StreamEvent.TextDelta delta -> contentBuilder.append(delta.text());
+                                case LLMClient.StreamEvent.ToolUse toolUse -> {
+                                    Message.ToolUse tu = toolUse.toolUse();
+                                    allToolUses.add(tu);
+                                    System.out.println("  [入队] " + tu.name() + " (id: " + tu.id() + ")");
+                                    executor.addTool(tu);
+                                }
+                            }
+                        })
+                        .blockLast();
             } catch (RuntimeException streamError) {
                 // 流式中断：取消已启动的工具，丢弃本轮所有副作用，不写入半截消息
                 executor.discard();

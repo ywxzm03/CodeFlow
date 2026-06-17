@@ -14,6 +14,9 @@ dependencies {
     // Anthropic 官方 Java SDK（Messages API raw stream，用于 Claude Code 风格的流式工具调用）
     implementation("com.anthropic:anthropic-java:2.40.1")
 
+    // Reactor Core（push-style 流式事件传递）
+    implementation("io.projectreactor:reactor-core:3.8.6")
+
     // Jackson for JSON processing
     implementation("com.fasterxml.jackson.core:jackson-databind:2.17.0")
 

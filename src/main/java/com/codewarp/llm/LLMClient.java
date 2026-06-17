@@ -2,8 +2,8 @@ package com.codewarp.llm;
 
 import com.codewarp.core.Message;
 import com.codewarp.tools.Tool;
+import reactor.core.publisher.Flux;
 
-import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -30,9 +30,9 @@ public interface LLMClient {
      * @param systemPrompt 系统提示词
      * @param messages 历史消息
      * @param tools 可用工具列表
-     * @return 流式事件迭代器
+     * @return 流式事件序列
      */
-    Iterator<StreamEvent> callStreaming(String systemPrompt, List<Message> messages, List<Tool> tools);
+    Flux<StreamEvent> callStreaming(String systemPrompt, List<Message> messages, List<Tool> tools);
 
     /**
      * LLM响应
