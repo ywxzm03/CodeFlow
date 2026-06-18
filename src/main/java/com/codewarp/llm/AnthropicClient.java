@@ -40,7 +40,7 @@ import java.util.Map;
 public class AnthropicClient implements LLMClient {
 
     private final com.anthropic.client.AnthropicClient client;
-    private final String model;
+    private volatile String model;
     private final int maxTokens;
     private final ObjectMapper objectMapper;
 
@@ -101,6 +101,14 @@ public class AnthropicClient implements LLMClient {
                 streamResponse.close();
             }
         });
+    }
+
+    @Override
+    public void setModel(String model) {
+        if (model == null || model.isBlank()) {
+            throw new IllegalArgumentException("Model must not be blank");
+        }
+        this.model = model;
     }
 
     /** 只关心三类 content_block 事件，其余（message_start/delta/stop、ping）忽略。 */

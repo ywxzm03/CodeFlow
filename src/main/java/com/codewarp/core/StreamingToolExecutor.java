@@ -1,6 +1,7 @@
 package com.codewarp.core;
 
 import com.codewarp.tools.Tool;
+import com.codewarp.util.Console;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -84,7 +85,7 @@ public class StreamingToolExecutor {
             if (hasErrored) {
                 tool.result = Tool.ToolExecutionResult.error("已取消：前序 Bash 工具失败");
                 tool.status = ToolStatus.COMPLETED;
-                System.out.println("  [取消] " + tool.toolName + " (id: " + tool.toolUseId + ")");
+                Console.info("  [取消] " + tool.toolName + " (id: " + tool.toolUseId + ")");
                 notifyAll();
                 continue;
             }
@@ -128,7 +129,7 @@ public class StreamingToolExecutor {
 
         CompletableFuture<Tool.ToolExecutionResult> future = CompletableFuture.supplyAsync(() -> {
             try {
-                System.out.println("  [执行] " + tracked.toolName + " (id: " + tracked.toolUseId + ")");
+                Console.info("  [执行] " + tracked.toolName + " (id: " + tracked.toolUseId + ")");
                 return toolDefinition.execute(tracked.input);
             } catch (Exception e) {
                 return Tool.ToolExecutionResult.error("工具执行异常: " + e.getMessage());
@@ -153,8 +154,8 @@ public class StreamingToolExecutor {
                     cancelExecutingSiblings(tracked);
                 }
 
-                System.out.println("  [完成] " + tracked.toolName + " - " +
-                                 (tracked.result.isError() ? "错误" : "成功"));
+                Console.info("  [完成] " + tracked.toolName + " - " +
+                        (tracked.result.isError() ? "错误" : "成功"));
 
                 notifyAll();      // 唤醒 getRemainingResults
                 processQueue();   // 推进队列

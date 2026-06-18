@@ -35,6 +35,11 @@ public interface LLMClient {
     Flux<StreamEvent> callStreaming(String systemPrompt, List<Message> messages, List<Tool> tools);
 
     /**
+     * 切换后续请求使用的模型。
+     */
+    void setModel(String model);
+
+    /**
      * LLM响应
      */
     record LLMResponse(String content, List<Message.ToolUse> toolUses) {

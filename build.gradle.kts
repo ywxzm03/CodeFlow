@@ -17,12 +17,19 @@ dependencies {
     // Reactor Core（push-style 流式事件传递）
     implementation("io.projectreactor:reactor-core:3.8.6")
 
+    // JLine（终端行编辑、逐键重绘和 slash 命令候选提示）
+    implementation("org.jline:jline:3.28.0")
+
+    // SLF4J simple binding，避免运行时无 provider 警告
+    runtimeOnly("org.slf4j:slf4j-simple:2.0.13")
+
     // Jackson for JSON processing
     implementation("com.fasterxml.jackson.core:jackson-databind:2.17.0")
 
     // Testing
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 java {

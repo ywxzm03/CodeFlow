@@ -69,7 +69,6 @@ public class ConfigManager {
 
         // 写入配置文件
         objectMapper.writeValue(configFile.toFile(), settings);
-        System.out.println("配置已保存到: " + configFile);
     }
 
     /**
@@ -86,7 +85,12 @@ public class ConfigManager {
                 {
                   "api_key": "YOUR_API_KEY_HERE",
                   "base_url": "https://api.anthropic.com/v1/messages",
-                  "model": "claude-opus-4-20250514",
+                  "model": "A",
+                  "models": {
+                    "A": "claude-opus-4-20250514",
+                    "B": "claude-sonnet-4-20250514",
+                    "C": "claude-haiku-4-20250514"
+                  },
                   "max_tokens": 8192,
                   "max_iterations": 25
                 }

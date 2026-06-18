@@ -5,6 +5,7 @@ import com.codewarp.config.Settings;
 import com.codewarp.core.QueryEngine;
 import com.codewarp.llm.AnthropicClient;
 import com.codewarp.llm.LLMClient;
+import com.codewarp.terminal.TerminalSession;
 import com.codewarp.tools.BashTool;
 import com.codewarp.tools.EditTool;
 import com.codewarp.tools.GlobTool;
@@ -12,9 +13,13 @@ import com.codewarp.tools.GrepTool;
 import com.codewarp.tools.ReadTool;
 import com.codewarp.tools.Tool;
 import com.codewarp.tools.WriteTool;
+import com.codewarp.util.Console;
 
 import java.util.List;
-import java.util.Scanner;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogManager;
+import java.util.logging.Logger;
 
 /**
  * CodeWarp主应用
@@ -22,9 +27,7 @@ import java.util.Scanner;
 public class CodeWarp {
 
     public static void main(String[] args) {
-        System.out.println("=".repeat(60));
-        System.out.println("CodeWarp - AI Coding Assistant");
-        System.out.println("=".repeat(60));
+        silenceLibraryLogging();
 
         // 加载配置
         ConfigManager configManager = new ConfigManager();
@@ -38,26 +41,10 @@ public class CodeWarp {
             if (!validation.valid()) {
                 System.err.println("\n错误: " + validation.error());
                 System.err.println("请编辑配置文件: " + configManager.getConfigFilePath());
-                System.err.println("\n示例配置:");
-                System.err.println("""
-                        {
-                          "api_key": "sk-ant-...",
-                          "base_url": "https://api.anthropic.com/v1/messages",
-                          "model": "claude-opus-4-20250514",
-                          "max_tokens": 8192,
-                          "max_iterations": 25
-                        }
-
-                        支持 Anthropic Messages 协议的端点：
-                        - Anthropic: https://api.anthropic.com/v1/messages
-                        - DeepSeek Anthropic 兼容端点: https://api.deepseek.com/anthropic/v1/messages
-                        - GLM Anthropic 兼容端点: 按厂商文档填写 /v1/messages 端点
-                        """);
                 System.exit(1);
             }
 
-            System.out.println("✓ 配置已加载: " + configManager.getConfigFilePath());
-            System.out.println("✓ 使用模型: " + settings.model());
+            Console.info("配置已加载: " + configManager.getConfigFilePath());
 
         } catch (Exception e) {
             System.err.println("错误: 加载配置失败 - " + e.getMessage());
@@ -69,7 +56,7 @@ public class CodeWarp {
         LLMClient llmClient = new AnthropicClient(
                 settings.apiKey(),
                 settings.baseUrl(),
-                settings.model(),
+                settings.resolvedModel(),
                 settings.maxTokens()
         );
 
@@ -84,48 +71,19 @@ public class CodeWarp {
 
         QueryEngine queryEngine = new QueryEngine(llmClient, tools, settings.maxIterations());
 
-        // 启动CLI
-        startCLI(queryEngine);
+        // 启动终端交互
+        new TerminalSession(queryEngine, llmClient, configManager, settings).run();
     }
 
-    private static void startCLI(QueryEngine queryEngine) {
-        Scanner scanner = new Scanner(System.in);
-
-        System.out.println("\n可用工具: Read, Write, Edit, Bash, Grep, Glob");
-        System.out.println("输入 'exit' 退出程序\n");
-
-        while (true) {
-            System.out.print("\n> ");
-            String input = scanner.nextLine().trim();
-
-            if (input.isEmpty()) {
-                continue;
-            }
-
-            if ("exit".equalsIgnoreCase(input)) {
-                System.out.println("再见!");
-                break;
-            }
-
-            try {
-                // 执行查询
-                QueryEngine.QueryResult result = queryEngine.query(input);
-
-                // 输出最终结果
-                System.out.println("\n" + "=".repeat(60));
-                System.out.println("最终响应:");
-                System.out.println("-".repeat(60));
-                System.out.println(result.finalResponse());
-                System.out.println("=".repeat(60));
-                System.out.println("统计: " + result.iterations() + " 次迭代, " +
-                                 result.stopReason());
-
-            } catch (Exception e) {
-                System.err.println("\n错误: " + e.getMessage());
-                e.printStackTrace();
+    private static void silenceLibraryLogging() {
+        System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "off");
+        Logger.getLogger("org.jline").setLevel(Level.OFF);
+        Logger rootLogger = LogManager.getLogManager().getLogger("");
+        if (rootLogger != null) {
+            rootLogger.setLevel(Level.OFF);
+            for (Handler handler : rootLogger.getHandlers()) {
+                handler.setLevel(Level.OFF);
             }
         }
-
-        scanner.close();
     }
 }
