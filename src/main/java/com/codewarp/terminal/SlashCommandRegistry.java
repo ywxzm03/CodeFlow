@@ -31,6 +31,7 @@ public final class SlashCommandRegistry {
             context.print("Current model: " + modelName);
             return SlashCommand.Result.CONTINUE;
         }));
+        commands.add(new SlashCommand("permissions", "Select permission mode", (context, arguments) -> SlashCommand.Result.CONTINUE));
         return new SlashCommandRegistry(commands);
     }
 

@@ -93,6 +93,7 @@ public class ConfigManager {
                   },
                   "max_tokens": 8192,
                   "max_iterations": 25,
+                  "permission_mode": "ask",
                   "tool_permissions": {
                     "Read": "ask",
                     "Write": "ask",

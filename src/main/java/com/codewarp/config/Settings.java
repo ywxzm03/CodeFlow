@@ -1,5 +1,6 @@
 package com.codewarp.config;
 
+import com.codewarp.permissions.PermissionMode;
 import com.codewarp.permissions.ToolPermission;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -18,6 +19,7 @@ public record Settings(
         @JsonProperty("models") Map<String, String> models,
         @JsonProperty("max_tokens") Integer maxTokens,
         @JsonProperty("max_iterations") Integer maxIterations,
+        @JsonProperty("permission_mode") PermissionMode permissionMode,
         @JsonProperty("tool_permissions") Map<String, ToolPermission> toolPermissions
 ) {
     private static final String DEFAULT_MODEL_KEY = "A";
@@ -30,7 +32,7 @@ public record Settings(
             Integer maxTokens,
             Integer maxIterations
     ) {
-        this(apiKey, baseUrl, model, models, maxTokens, maxIterations, null);
+        this(apiKey, baseUrl, model, models, maxTokens, maxIterations, null, null);
     }
 
     /**
@@ -44,6 +46,7 @@ public record Settings(
                 defaultModels(),
                 8192,
                 25,
+                PermissionMode.ASK,
                 defaultToolPermissions()
         );
     }
@@ -59,12 +62,17 @@ public record Settings(
                 other.models != null ? other.models : this.models,
                 other.maxTokens != null ? other.maxTokens : this.maxTokens,
                 other.maxIterations != null ? other.maxIterations : this.maxIterations,
+                other.permissionMode != null ? other.permissionMode : this.permissionMode,
                 other.toolPermissions != null ? other.toolPermissions : this.toolPermissions
         );
     }
 
     public Settings withModel(String model) {
-        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, toolPermissions);
+        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions);
+    }
+
+    public Settings withPermissionMode(PermissionMode permissionMode) {
+        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions);
     }
 
     public String resolvedModel() {
@@ -80,6 +88,10 @@ public record Settings(
 
     public Map<String, ToolPermission> resolvedToolPermissions() {
         return toolPermissions == null ? defaultToolPermissions() : toolPermissions;
+    }
+
+    public PermissionMode resolvedPermissionMode() {
+        return permissionMode == null ? PermissionMode.ASK : permissionMode;
     }
 
     /**

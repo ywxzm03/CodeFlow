@@ -4,6 +4,7 @@ import com.codewarp.config.ConfigManager;
 import com.codewarp.config.Settings;
 import com.codewarp.core.QueryEngine;
 import com.codewarp.llm.LLMClient;
+import com.codewarp.permissions.PermissionMode;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.UserInterruptException;
@@ -185,6 +186,11 @@ public final class TerminalSession implements AutoCloseable {
             return;
         }
 
+        if ("/permissions".equals(input)) {
+            handlePermissionsCommand();
+            return;
+        }
+
         slashCommands.exact(input).ifPresentOrElse(command -> {
             String arguments = slashArguments(input);
             SlashCommand.Result result = command.handler().handle(new TerminalCommandContext(), arguments);
@@ -266,6 +272,82 @@ public final class TerminalSession implements AutoCloseable {
         }
     }
 
+    private void handlePermissionsCommand() {
+        List<PermissionModeOption> options = permissionModeOptions();
+        try {
+            PermissionModeOption selected = choosePermissionMode(options);
+            if (selected != null) {
+                applyPermissionModeSelection(selected);
+            }
+        } catch (IOException e) {
+            terminal.writer().println("Failed to select permission mode: " + e.getMessage());
+            terminal.writer().flush();
+        }
+    }
+
+    private PermissionModeOption choosePermissionMode(List<PermissionModeOption> options) throws IOException {
+        int selected = selectedPermissionModeIndex(options);
+        Attributes originalAttributes = terminal.enterRawMode();
+        try {
+            hideCursor();
+            renderPermissionModeOptions(options, selected, false);
+            while (true) {
+                switch (readModelSelectionKey()) {
+                    case UP -> {
+                        selected = selected == 0 ? options.size() - 1 : selected - 1;
+                        renderPermissionModeOptions(options, selected, true);
+                    }
+                    case DOWN -> {
+                        selected = selected == options.size() - 1 ? 0 : selected + 1;
+                        renderPermissionModeOptions(options, selected, true);
+                    }
+                    case ACCEPT -> {
+                        return options.get(selected);
+                    }
+                    case CANCEL -> {
+                        return null;
+                    }
+                    case IGNORED -> {
+                        // Ignore unrelated keys while the selector is open.
+                    }
+                }
+            }
+        } finally {
+            clearModelOptions(options.size());
+            showCursor();
+            terminal.setAttributes(originalAttributes);
+        }
+    }
+
+    private void applyPermissionModeSelection(PermissionModeOption option) throws IOException {
+        settings = settings.withPermissionMode(option.mode());
+        if (configManager != null) {
+            configManager.save(settings);
+        }
+    }
+
+    private int selectedPermissionModeIndex(List<PermissionModeOption> options) {
+        PermissionMode selectedMode = settings.resolvedPermissionMode();
+        for (int i = 0; i < options.size(); i++) {
+            if (options.get(i).mode() == selectedMode) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private void renderPermissionModeOptions(List<PermissionModeOption> options, int selected, boolean redraw) {
+        if (redraw) {
+            terminal.writer().print("\u001B[" + options.size() + "A");
+        }
+        for (int i = 0; i < options.size(); i++) {
+            terminal.writer().print("\r\u001B[2K");
+            terminal.writer().print(formatPermissionModeOption(options.get(i), i == selected));
+            terminal.writer().print("\r\n");
+        }
+        terminal.writer().flush();
+    }
+
     private int selectedModelIndex(List<ModelOption> options) {
         String selected = settings.model();
         String resolved = settings.resolvedModel();
@@ -310,6 +392,13 @@ public final class TerminalSession implements AutoCloseable {
     }
 
     private String formatModelOption(ModelOption option, boolean selected) {
+        if (selected) {
+            return BLUE + "> " + option.label() + RESET;
+        }
+        return "  " + option.label();
+    }
+
+    private String formatPermissionModeOption(PermissionModeOption option, boolean selected) {
         if (selected) {
             return BLUE + "> " + option.label() + RESET;
         }
@@ -371,6 +460,13 @@ public final class TerminalSession implements AutoCloseable {
         return options;
     }
 
+    static List<PermissionModeOption> permissionModeOptions() {
+        return List.of(
+                new PermissionModeOption(PermissionMode.ASK, PermissionMode.ASK.displayName()),
+                new PermissionModeOption(PermissionMode.FULL_ACCESS, PermissionMode.FULL_ACCESS.displayName())
+        );
+    }
+
     @Override
     public void close() {
         if (terminal != null) {
@@ -404,6 +500,8 @@ public final class TerminalSession implements AutoCloseable {
     }
 
     record ModelOption(String key, String label, String model) {}
+
+    record PermissionModeOption(PermissionMode mode, String label) {}
 
     private enum ModelSelectionKey {
         UP,

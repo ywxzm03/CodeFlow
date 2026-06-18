@@ -47,4 +47,22 @@ class ToolPermissionConfigTest {
         assertEquals(ToolPermission.DENY, settings.toolPermissions().get("Bash"));
         assertEquals(ToolPermission.ASK, settings.toolPermissions().get("Write"));
     }
+
+    @Test
+    void settingsReadsPermissionModeFromJson() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        Settings settings = objectMapper.readValue("""
+                {
+                  "api_key": "key",
+                  "base_url": "url",
+                  "model": "A",
+                  "max_tokens": 1000,
+                  "max_iterations": 5,
+                  "permission_mode": "full_access"
+                }
+                """, Settings.class);
+
+        assertEquals(PermissionMode.FULL_ACCESS, settings.permissionMode());
+    }
 }

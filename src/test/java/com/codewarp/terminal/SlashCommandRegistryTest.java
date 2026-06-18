@@ -1,6 +1,7 @@
 package com.codewarp.terminal;
 
 import com.codewarp.config.Settings;
+import com.codewarp.permissions.PermissionMode;
 import org.jline.reader.Candidate;
 import org.jline.reader.LineReaderBuilder;
 import org.junit.jupiter.api.Test;
@@ -24,7 +25,7 @@ class SlashCommandRegistryTest {
                 .map(SlashCommand::displayName)
                 .toList();
 
-        assertEquals(List.of("/exit", "/help", "/model"), matches);
+        assertEquals(List.of("/exit", "/help", "/model", "/permissions"), matches);
     }
 
     @Test
@@ -56,7 +57,7 @@ class SlashCommandRegistryTest {
         reader.getBuffer().write("/");
         completer.complete(reader, null, candidates);
 
-        assertEquals(List.of("/exit", "/help", "/model"), candidateValues(candidates));
+        assertEquals(List.of("/exit", "/help", "/model", "/permissions"), candidateValues(candidates));
     }
 
     @Test
@@ -70,6 +71,19 @@ class SlashCommandRegistryTest {
         completer.complete(reader, null, candidates);
 
         assertEquals(List.of("/model"), candidateValues(candidates));
+    }
+
+    @Test
+    void completerFiltersPermissionsCommandAsUserTypes() {
+        SlashCommandRegistry registry = registry();
+        SlashCommandCompleter completer = new SlashCommandCompleter(registry);
+        List<Candidate> candidates = new ArrayList<>();
+        var reader = LineReaderBuilder.builder().build();
+
+        reader.getBuffer().write("/pe");
+        completer.complete(reader, null, candidates);
+
+        assertEquals(List.of("/permissions"), candidateValues(candidates));
     }
 
     @Test
@@ -116,10 +130,23 @@ class SlashCommandRegistryTest {
         assertEquals("legacy-model", settings.resolvedModel());
     }
 
+    @Test
+    void permissionModeOptionsContainAskAndFullAccess() {
+        List<TerminalSession.PermissionModeOption> options = TerminalSession.permissionModeOptions();
+
+        assertEquals(List.of("Ask", "Full Access"), options.stream()
+                .map(TerminalSession.PermissionModeOption::label)
+                .toList());
+        assertEquals(List.of(PermissionMode.ASK, PermissionMode.FULL_ACCESS), options.stream()
+                .map(TerminalSession.PermissionModeOption::mode)
+                .toList());
+    }
+
     private SlashCommandRegistry registry() {
         return new SlashCommandRegistry(List.of(
                 new SlashCommand("help", "Show help", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("model", "Show model", (context, arguments) -> SlashCommand.Result.CONTINUE),
+                new SlashCommand("permissions", "Select permission mode", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("exit", "Exit", (context, arguments) -> SlashCommand.Result.EXIT)
         ));
     }
