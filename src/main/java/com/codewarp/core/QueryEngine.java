@@ -2,6 +2,7 @@ package com.codewarp.core;
 
 import com.codewarp.llm.LLMClient;
 import com.codewarp.permissions.ToolPermissionConfig;
+import com.codewarp.permissions.ToolPermissionManager;
 import com.codewarp.tools.Tool;
 import com.codewarp.util.Console;
 
@@ -34,17 +35,21 @@ public class QueryEngine {
     private final LLMClient llmClient;
     private final List<Tool> tools;
     private final int maxIterations;
-    private final ToolPermissionConfig toolPermissionConfig;
+    private final ToolPermissionManager toolPermissionManager;
 
     public QueryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations) {
-        this(llmClient, tools, maxIterations, ToolPermissionConfig.empty());
+        this(llmClient, tools, maxIterations, ToolPermissionManager.askByDefault());
     }
 
     public QueryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations, ToolPermissionConfig toolPermissionConfig) {
+        this(llmClient, tools, maxIterations, new ToolPermissionManager(toolPermissionConfig, null));
+    }
+
+    public QueryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations, ToolPermissionManager toolPermissionManager) {
         this.llmClient = llmClient;
         this.tools = tools;
         this.maxIterations = maxIterations;
-        this.toolPermissionConfig = toolPermissionConfig == null ? ToolPermissionConfig.empty() : toolPermissionConfig;
+        this.toolPermissionManager = toolPermissionManager == null ? ToolPermissionManager.askByDefault() : toolPermissionManager;
     }
 
     /**
@@ -83,7 +88,7 @@ public class QueryEngine {
      */
     private QueryResult executeStreamingIteration(List<Message> messages, int iteration) {
         // 创建流式工具执行器
-        StreamingToolExecutor executor = new StreamingToolExecutor(tools, toolPermissionConfig);
+        StreamingToolExecutor executor = new StreamingToolExecutor(tools, toolPermissionManager);
 
         try {
             StringBuilder contentBuilder = new StringBuilder();

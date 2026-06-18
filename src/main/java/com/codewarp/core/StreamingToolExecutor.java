@@ -2,6 +2,7 @@ package com.codewarp.core;
 
 import com.codewarp.permissions.ToolPermission;
 import com.codewarp.permissions.ToolPermissionConfig;
+import com.codewarp.permissions.ToolPermissionManager;
 import com.codewarp.tools.Tool;
 import com.codewarp.util.Console;
 
@@ -24,19 +25,23 @@ import java.util.concurrent.Executors;
 public class StreamingToolExecutor {
 
     private final List<Tool> toolDefinitions;
-    private final ToolPermissionConfig toolPermissionConfig;
+    private final ToolPermissionManager toolPermissionManager;
     private final List<TrackedTool> tools;
     private final ExecutorService executorService;
     private volatile boolean hasErrored;
     private volatile boolean discarded;
 
     public StreamingToolExecutor(List<Tool> toolDefinitions) {
-        this(toolDefinitions, ToolPermissionConfig.empty());
+        this(toolDefinitions, ToolPermissionManager.askByDefault());
     }
 
     public StreamingToolExecutor(List<Tool> toolDefinitions, ToolPermissionConfig toolPermissionConfig) {
+        this(toolDefinitions, new ToolPermissionManager(toolPermissionConfig, null));
+    }
+
+    public StreamingToolExecutor(List<Tool> toolDefinitions, ToolPermissionManager toolPermissionManager) {
         this.toolDefinitions = toolDefinitions;
-        this.toolPermissionConfig = toolPermissionConfig == null ? ToolPermissionConfig.empty() : toolPermissionConfig;
+        this.toolPermissionManager = toolPermissionManager == null ? ToolPermissionManager.askByDefault() : toolPermissionManager;
         this.tools = new ArrayList<>();
         this.executorService = Executors.newCachedThreadPool();
         this.hasErrored = false;
@@ -82,7 +87,7 @@ public class StreamingToolExecutor {
             return;
         }
 
-        ToolPermission permission = toolPermissionConfig.permissionFor(toolUse.name());
+        ToolPermission permission = toolPermissionManager.permissionFor(toolUse.name());
         if (permission == ToolPermission.DENY) {
             TrackedTool tracked = new TrackedTool(
                     toolUse.id(),
@@ -98,17 +103,20 @@ public class StreamingToolExecutor {
         }
 
         if (permission == ToolPermission.ASK) {
-            TrackedTool tracked = new TrackedTool(
-                    toolUse.id(),
-                    toolUse.name(),
-                    toolUse.input(),
-                    false,
-                    ToolStatus.COMPLETED
-            );
-            tracked.result = Tool.ToolExecutionResult.error("工具需要用户确认: " + toolUse.name());
-            tools.add(tracked);
-            notifyAll();
-            return;
+            boolean confirmed = toolPermissionManager.confirm(toolUse.name(), toolUse.input());
+            if (!confirmed) {
+                TrackedTool tracked = new TrackedTool(
+                        toolUse.id(),
+                        toolUse.name(),
+                        toolUse.input(),
+                        false,
+                        ToolStatus.COMPLETED
+                );
+                tracked.result = Tool.ToolExecutionResult.error("工具未获得用户确认: " + toolUse.name());
+                tools.add(tracked);
+                notifyAll();
+                return;
+            }
         }
 
         boolean isConcurrencySafe = toolDefinition.isConcurrencySafe();

@@ -5,6 +5,7 @@ import com.codewarp.config.Settings;
 import com.codewarp.core.QueryEngine;
 import com.codewarp.llm.LLMClient;
 import com.codewarp.permissions.PermissionMode;
+import com.codewarp.permissions.ToolPermissionManager;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.UserInterruptException;
@@ -33,6 +34,7 @@ public final class TerminalSession implements AutoCloseable {
     private final LLMClient llmClient;
     private final ConfigManager configManager;
     private final SlashCommandRegistry slashCommands;
+    private final ToolPermissionManager toolPermissionManager;
     private final AtomicBoolean exitRequested = new AtomicBoolean(false);
     private Settings settings;
 
@@ -40,15 +42,25 @@ public final class TerminalSession implements AutoCloseable {
     private SlashLineReader reader;
 
     public TerminalSession(QueryEngine queryEngine, Settings settings) {
-        this(queryEngine, null, null, settings, SlashCommandRegistry.defaults(settings.resolvedModel()));
+        this(queryEngine, null, null, settings, SlashCommandRegistry.defaults(settings.resolvedModel()), null);
     }
 
     public TerminalSession(QueryEngine queryEngine, LLMClient llmClient, ConfigManager configManager, Settings settings) {
-        this(queryEngine, llmClient, configManager, settings, SlashCommandRegistry.defaults(settings.resolvedModel()));
+        this(queryEngine, llmClient, configManager, settings, SlashCommandRegistry.defaults(settings.resolvedModel()), null);
+    }
+
+    public TerminalSession(
+            QueryEngine queryEngine,
+            LLMClient llmClient,
+            ConfigManager configManager,
+            Settings settings,
+            ToolPermissionManager toolPermissionManager
+    ) {
+        this(queryEngine, llmClient, configManager, settings, SlashCommandRegistry.defaults(settings.resolvedModel()), toolPermissionManager);
     }
 
     TerminalSession(QueryEngine queryEngine, SlashCommandRegistry slashCommands) {
-        this(queryEngine, null, null, Settings.defaults(), slashCommands);
+        this(queryEngine, null, null, Settings.defaults(), slashCommands, null);
     }
 
     TerminalSession(
@@ -56,13 +68,18 @@ public final class TerminalSession implements AutoCloseable {
             LLMClient llmClient,
             ConfigManager configManager,
             Settings settings,
-            SlashCommandRegistry slashCommands
+            SlashCommandRegistry slashCommands,
+            ToolPermissionManager toolPermissionManager
     ) {
         this.queryEngine = queryEngine;
         this.llmClient = llmClient;
         this.configManager = configManager;
         this.settings = settings;
         this.slashCommands = slashCommands;
+        this.toolPermissionManager = toolPermissionManager;
+        if (this.toolPermissionManager != null) {
+            this.toolPermissionManager.setConfirmer(this::confirmToolUse);
+        }
     }
 
     public void run() {
@@ -321,9 +338,44 @@ public final class TerminalSession implements AutoCloseable {
 
     private void applyPermissionModeSelection(PermissionModeOption option) throws IOException {
         settings = settings.withPermissionMode(option.mode());
+        if (toolPermissionManager != null) {
+            toolPermissionManager.setPermissionMode(option.mode());
+        }
         if (configManager != null) {
             configManager.save(settings);
         }
+    }
+
+    private boolean confirmToolUse(String toolName, String input) {
+        if (terminal == null || reader == null) {
+            return false;
+        }
+
+        terminal.writer().println();
+        terminal.writer().println("Tool requires permission: " + toolName);
+        terminal.writer().println(formatToolInputForConfirmation(input));
+        terminal.writer().flush();
+
+        try {
+            String answer = reader.readLine("Allow " + toolName + "? [y/N] ");
+            return "y".equalsIgnoreCase(answer.trim()) || "yes".equalsIgnoreCase(answer.trim());
+        } catch (UserInterruptException | EndOfFileException e) {
+            terminal.writer().println();
+            terminal.writer().flush();
+            return false;
+        }
+    }
+
+    private String formatToolInputForConfirmation(String input) {
+        if (input == null || input.isBlank()) {
+            return "{}";
+        }
+
+        int maxLength = 2000;
+        if (input.length() <= maxLength) {
+            return input;
+        }
+        return input.substring(0, maxLength) + "\n... truncated";
     }
 
     private int selectedPermissionModeIndex(List<PermissionModeOption> options) {
