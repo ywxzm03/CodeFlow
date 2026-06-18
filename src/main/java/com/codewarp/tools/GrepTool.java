@@ -8,6 +8,7 @@ import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -153,6 +154,24 @@ public class GrepTool implements Tool {
 
         } catch (Exception e) {
             return ToolExecutionResult.error("搜索失败: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public ValidationResult validateInput(String input) {
+        try {
+            JsonNode inputNode = ToolInputValidator.parseObject(input);
+            ToolInputValidator.rejectUnknownFields(inputNode, Set.of(
+                    "pattern", "glob", "output_mode", "case_sensitive", "root"
+            ));
+            ToolInputValidator.requireText(inputNode, "pattern");
+            ToolInputValidator.optionalText(inputNode, "glob");
+            ToolInputValidator.optionalEnum(inputNode, "output_mode", Set.of("content", "files", "count"));
+            ToolInputValidator.optionalBoolean(inputNode, "case_sensitive");
+            ToolInputValidator.optionalText(inputNode, "root");
+            return ValidationResult.valid();
+        } catch (IllegalArgumentException e) {
+            return ValidationResult.invalid(e.getMessage());
         }
     }
 

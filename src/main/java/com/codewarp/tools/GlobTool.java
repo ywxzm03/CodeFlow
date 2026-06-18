@@ -8,7 +8,7 @@ import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Set;
 
 /**
  * 文件查找工具：使用 glob 模式查找文件。
@@ -160,6 +160,20 @@ public class GlobTool implements Tool {
 
         } catch (Exception e) {
             return ToolExecutionResult.error("查找文件失败: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public ValidationResult validateInput(String input) {
+        try {
+            JsonNode inputNode = ToolInputValidator.parseObject(input);
+            ToolInputValidator.rejectUnknownFields(inputNode, Set.of("patterns", "exclude", "root"));
+            ToolInputValidator.requireTextArray(inputNode, "patterns");
+            ToolInputValidator.optionalTextArray(inputNode, "exclude");
+            ToolInputValidator.optionalText(inputNode, "root");
+            return ValidationResult.valid();
+        } catch (IllegalArgumentException e) {
+            return ValidationResult.invalid(e.getMessage());
         }
     }
 

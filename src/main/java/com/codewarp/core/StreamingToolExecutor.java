@@ -59,6 +59,21 @@ public class StreamingToolExecutor {
             return;
         }
 
+        Tool.ValidationResult validationResult = toolDefinition.validateInput(toolUse.input());
+        if (!validationResult.allowed()) {
+            TrackedTool tracked = new TrackedTool(
+                    toolUse.id(),
+                    toolUse.name(),
+                    toolUse.input(),
+                    false,
+                    ToolStatus.COMPLETED
+            );
+            tracked.result = Tool.ToolExecutionResult.error("工具参数无效: " + validationResult.message());
+            tools.add(tracked);
+            notifyAll();
+            return;
+        }
+
         boolean isConcurrencySafe = toolDefinition.isConcurrencySafe();
         TrackedTool tracked = new TrackedTool(
                 toolUse.id(),

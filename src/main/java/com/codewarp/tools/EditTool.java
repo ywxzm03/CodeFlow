@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 编辑文件工具：精确字符串替换。
@@ -128,6 +129,21 @@ public class EditTool implements Tool {
 
         } catch (Exception e) {
             return ToolExecutionResult.error("编辑文件失败: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public ValidationResult validateInput(String input) {
+        try {
+            JsonNode inputNode = ToolInputValidator.parseObject(input);
+            ToolInputValidator.rejectUnknownFields(inputNode, Set.of("file_path", "old_string", "new_string", "replace_all"));
+            ToolInputValidator.requireText(inputNode, "file_path");
+            ToolInputValidator.requireText(inputNode, "old_string");
+            ToolInputValidator.requireTextAllowEmpty(inputNode, "new_string");
+            ToolInputValidator.optionalBoolean(inputNode, "replace_all");
+            return ValidationResult.valid();
+        } catch (IllegalArgumentException e) {
+            return ValidationResult.invalid(e.getMessage());
         }
     }
 

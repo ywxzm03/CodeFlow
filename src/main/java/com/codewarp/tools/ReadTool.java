@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Set;
 
 /**
  * 读取文件工具。
@@ -77,6 +78,18 @@ public class ReadTool implements Tool {
 
         } catch (Exception e) {
             return ToolExecutionResult.error("读取文件失败: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public ValidationResult validateInput(String input) {
+        try {
+            JsonNode inputNode = ToolInputValidator.parseObject(input);
+            ToolInputValidator.rejectUnknownFields(inputNode, Set.of("file_path"));
+            ToolInputValidator.requireText(inputNode, "file_path");
+            return ValidationResult.valid();
+        } catch (IllegalArgumentException e) {
+            return ValidationResult.invalid(e.getMessage());
         }
     }
 }

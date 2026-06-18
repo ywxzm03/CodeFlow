@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -111,6 +112,18 @@ public class BashTool implements Tool {
                 process.destroyForcibly();
             }
             return ToolExecutionResult.error("执行命令失败: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public ValidationResult validateInput(String input) {
+        try {
+            JsonNode inputNode = ToolInputValidator.parseObject(input);
+            ToolInputValidator.rejectUnknownFields(inputNode, Set.of("command"));
+            ToolInputValidator.requireText(inputNode, "command");
+            return ValidationResult.valid();
+        } catch (IllegalArgumentException e) {
+            return ValidationResult.invalid(e.getMessage());
         }
     }
 }

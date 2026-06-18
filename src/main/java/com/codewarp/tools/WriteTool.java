@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Set;
 
 /**
  * 写入文件工具：覆盖写入（不存在则创建，含父目录）。
@@ -73,6 +74,19 @@ public class WriteTool implements Tool {
 
         } catch (Exception e) {
             return ToolExecutionResult.error("写入文件失败: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public ValidationResult validateInput(String input) {
+        try {
+            JsonNode inputNode = ToolInputValidator.parseObject(input);
+            ToolInputValidator.rejectUnknownFields(inputNode, Set.of("file_path", "content"));
+            ToolInputValidator.requireText(inputNode, "file_path");
+            ToolInputValidator.requireTextAllowEmpty(inputNode, "content");
+            return ValidationResult.valid();
+        } catch (IllegalArgumentException e) {
+            return ValidationResult.invalid(e.getMessage());
         }
     }
 }

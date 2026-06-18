@@ -29,6 +29,16 @@ public interface Tool {
     ToolExecutionResult execute(String input);
 
     /**
+     * 校验工具输入参数是否合法。
+     *
+     * @param input 工具输入（JSON格式）
+     * @return 校验结果，成功时才会执行工具
+     */
+    default ValidationResult validateInput(String input) {
+        return ValidationResult.valid();
+    }
+
+    /**
      * 工具是否并发安全
      *
      * @return true 表示可以与其他并发安全工具并行执行，false 表示必须独占执行
@@ -47,6 +57,19 @@ public interface Tool {
 
         public static ToolExecutionResult error(String message) {
             return new ToolExecutionResult(message, true);
+        }
+    }
+
+    /**
+     * 工具参数校验结果。
+     */
+    record ValidationResult(boolean allowed, String message) {
+        public static ValidationResult valid() {
+            return new ValidationResult(true, "");
+        }
+
+        public static ValidationResult invalid(String message) {
+            return new ValidationResult(false, message);
         }
     }
 }
