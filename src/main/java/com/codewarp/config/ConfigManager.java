@@ -9,11 +9,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * 配置管理器 - 负责加载和保存 ~/.codewarp/settings.json
+ * 配置管理器 - 负责加载和保存 ~/.codewrap/settings.json
  */
 public class ConfigManager {
 
-    private static final String CONFIG_DIR_NAME = ".codewarp";
+    private static final String CONFIG_DIR_NAME = ".codewrap";
     private static final String CONFIG_FILE_NAME = "settings.json";
 
     private final Path configDir;
@@ -28,7 +28,7 @@ public class ConfigManager {
     }
 
     /**
-     * 获取配置目录路径 (~/.codewarp)
+     * 获取配置目录路径 (~/.codewrap)
      */
     private static Path getConfigDir() {
         String home = System.getProperty("user.home");
@@ -92,7 +92,15 @@ public class ConfigManager {
                     "C": "claude-haiku-4-20250514"
                   },
                   "max_tokens": 8192,
-                  "max_iterations": 25
+                  "max_iterations": 25,
+                  "tool_permissions": {
+                    "Read": "ask",
+                    "Write": "ask",
+                    "Edit": "ask",
+                    "Bash": "ask",
+                    "Grep": "ask",
+                    "Glob": "ask"
+                  }
                 }
                 """;
 

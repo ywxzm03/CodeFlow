@@ -1,5 +1,7 @@
 package com.codewarp.core;
 
+import com.codewarp.permissions.ToolPermission;
+import com.codewarp.permissions.ToolPermissionConfig;
 import com.codewarp.tools.Tool;
 import com.codewarp.util.Console;
 
@@ -22,13 +24,19 @@ import java.util.concurrent.Executors;
 public class StreamingToolExecutor {
 
     private final List<Tool> toolDefinitions;
+    private final ToolPermissionConfig toolPermissionConfig;
     private final List<TrackedTool> tools;
     private final ExecutorService executorService;
     private volatile boolean hasErrored;
     private volatile boolean discarded;
 
     public StreamingToolExecutor(List<Tool> toolDefinitions) {
+        this(toolDefinitions, ToolPermissionConfig.empty());
+    }
+
+    public StreamingToolExecutor(List<Tool> toolDefinitions, ToolPermissionConfig toolPermissionConfig) {
         this.toolDefinitions = toolDefinitions;
+        this.toolPermissionConfig = toolPermissionConfig == null ? ToolPermissionConfig.empty() : toolPermissionConfig;
         this.tools = new ArrayList<>();
         this.executorService = Executors.newCachedThreadPool();
         this.hasErrored = false;
@@ -69,6 +77,35 @@ public class StreamingToolExecutor {
                     ToolStatus.COMPLETED
             );
             tracked.result = Tool.ToolExecutionResult.error("工具参数无效: " + validationResult.message());
+            tools.add(tracked);
+            notifyAll();
+            return;
+        }
+
+        ToolPermission permission = toolPermissionConfig.permissionFor(toolUse.name());
+        if (permission == ToolPermission.DENY) {
+            TrackedTool tracked = new TrackedTool(
+                    toolUse.id(),
+                    toolUse.name(),
+                    toolUse.input(),
+                    false,
+                    ToolStatus.COMPLETED
+            );
+            tracked.result = Tool.ToolExecutionResult.error("工具权限拒绝: " + toolUse.name());
+            tools.add(tracked);
+            notifyAll();
+            return;
+        }
+
+        if (permission == ToolPermission.ASK) {
+            TrackedTool tracked = new TrackedTool(
+                    toolUse.id(),
+                    toolUse.name(),
+                    toolUse.input(),
+                    false,
+                    ToolStatus.COMPLETED
+            );
+            tracked.result = Tool.ToolExecutionResult.error("工具需要用户确认: " + toolUse.name());
             tools.add(tracked);
             notifyAll();
             return;

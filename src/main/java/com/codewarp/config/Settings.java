@@ -1,5 +1,6 @@
 package com.codewarp.config;
 
+import com.codewarp.permissions.ToolPermission;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -16,9 +17,21 @@ public record Settings(
         @JsonProperty("model") String model,
         @JsonProperty("models") Map<String, String> models,
         @JsonProperty("max_tokens") Integer maxTokens,
-        @JsonProperty("max_iterations") Integer maxIterations
+        @JsonProperty("max_iterations") Integer maxIterations,
+        @JsonProperty("tool_permissions") Map<String, ToolPermission> toolPermissions
 ) {
     private static final String DEFAULT_MODEL_KEY = "A";
+
+    public Settings(
+            String apiKey,
+            String baseUrl,
+            String model,
+            Map<String, String> models,
+            Integer maxTokens,
+            Integer maxIterations
+    ) {
+        this(apiKey, baseUrl, model, models, maxTokens, maxIterations, null);
+    }
 
     /**
      * 默认配置
@@ -30,7 +43,8 @@ public record Settings(
                 DEFAULT_MODEL_KEY,
                 defaultModels(),
                 8192,
-                25
+                25,
+                defaultToolPermissions()
         );
     }
 
@@ -44,12 +58,13 @@ public record Settings(
                 other.model != null ? other.model : this.model,
                 other.models != null ? other.models : this.models,
                 other.maxTokens != null ? other.maxTokens : this.maxTokens,
-                other.maxIterations != null ? other.maxIterations : this.maxIterations
+                other.maxIterations != null ? other.maxIterations : this.maxIterations,
+                other.toolPermissions != null ? other.toolPermissions : this.toolPermissions
         );
     }
 
     public Settings withModel(String model) {
-        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations);
+        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, toolPermissions);
     }
 
     public String resolvedModel() {
@@ -61,6 +76,10 @@ public record Settings(
 
     public Map<String, String> resolvedModels() {
         return models == null || models.isEmpty() ? defaultModels() : models;
+    }
+
+    public Map<String, ToolPermission> resolvedToolPermissions() {
+        return toolPermissions == null ? defaultToolPermissions() : toolPermissions;
     }
 
     /**
@@ -104,5 +123,16 @@ public record Settings(
         models.put("B", "claude-sonnet-4-20250514");
         models.put("C", "claude-haiku-4-20250514");
         return models;
+    }
+
+    private static Map<String, ToolPermission> defaultToolPermissions() {
+        Map<String, ToolPermission> permissions = new LinkedHashMap<>();
+        permissions.put("Read", ToolPermission.ASK);
+        permissions.put("Write", ToolPermission.ASK);
+        permissions.put("Edit", ToolPermission.ASK);
+        permissions.put("Bash", ToolPermission.ASK);
+        permissions.put("Grep", ToolPermission.ASK);
+        permissions.put("Glob", ToolPermission.ASK);
+        return permissions;
     }
 }

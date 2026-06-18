@@ -5,6 +5,7 @@ import com.codewarp.config.Settings;
 import com.codewarp.core.QueryEngine;
 import com.codewarp.llm.AnthropicClient;
 import com.codewarp.llm.LLMClient;
+import com.codewarp.permissions.ToolPermissionConfig;
 import com.codewarp.terminal.TerminalSession;
 import com.codewarp.tools.BashTool;
 import com.codewarp.tools.EditTool;
@@ -69,7 +70,8 @@ public class CodeWarp {
                 new GlobTool()
         );
 
-        QueryEngine queryEngine = new QueryEngine(llmClient, tools, settings.maxIterations());
+        ToolPermissionConfig toolPermissionConfig = new ToolPermissionConfig(settings.resolvedToolPermissions());
+        QueryEngine queryEngine = new QueryEngine(llmClient, tools, settings.maxIterations(), toolPermissionConfig);
 
         // 启动终端交互
         new TerminalSession(queryEngine, llmClient, configManager, settings).run();
