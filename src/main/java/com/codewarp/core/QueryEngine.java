@@ -1,6 +1,7 @@
 package com.codewarp.core;
 
 import com.codewarp.llm.LLMClient;
+import com.codewarp.memory.MemoryContextProvider;
 import com.codewarp.permissions.ToolPermissionConfig;
 import com.codewarp.permissions.ToolPermissionManager;
 import com.codewarp.tools.Tool;
@@ -36,6 +37,7 @@ public class QueryEngine {
     private final List<Tool> tools;
     private final int maxIterations;
     private final ToolPermissionManager toolPermissionManager;
+    private final MemoryContextProvider memoryContextProvider;
 
     public QueryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations) {
         this(llmClient, tools, maxIterations, ToolPermissionManager.askByDefault());
@@ -46,10 +48,21 @@ public class QueryEngine {
     }
 
     public QueryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations, ToolPermissionManager toolPermissionManager) {
+        this(llmClient, tools, maxIterations, toolPermissionManager, null);
+    }
+
+    public QueryEngine(
+            LLMClient llmClient,
+            List<Tool> tools,
+            int maxIterations,
+            ToolPermissionManager toolPermissionManager,
+            MemoryContextProvider memoryContextProvider
+    ) {
         this.llmClient = llmClient;
         this.tools = tools;
         this.maxIterations = maxIterations;
         this.toolPermissionManager = toolPermissionManager == null ? ToolPermissionManager.askByDefault() : toolPermissionManager;
+        this.memoryContextProvider = memoryContextProvider;
     }
 
     /**
@@ -89,6 +102,9 @@ public class QueryEngine {
     private QueryResult executeStreamingIteration(List<Message> messages, int iteration) {
         // 创建流式工具执行器
         StreamingToolExecutor executor = new StreamingToolExecutor(tools, toolPermissionManager);
+        String systemPrompt = memoryContextProvider == null
+                ? SYSTEM_PROMPT
+                : memoryContextProvider.buildSystemPrompt(SYSTEM_PROMPT);
 
         try {
             StringBuilder contentBuilder = new StringBuilder();
@@ -96,7 +112,7 @@ public class QueryEngine {
 
 
             try {
-                llmClient.callStreaming(SYSTEM_PROMPT, messages, tools)
+                llmClient.callStreaming(systemPrompt, messages, tools)
                         .doOnNext(event -> {
                             switch (event) {
                                 case LLMClient.StreamEvent.TextDelta delta -> contentBuilder.append(delta.text());

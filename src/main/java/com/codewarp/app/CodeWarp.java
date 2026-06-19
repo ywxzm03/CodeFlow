@@ -5,6 +5,8 @@ import com.codewarp.config.Settings;
 import com.codewarp.core.QueryEngine;
 import com.codewarp.llm.AnthropicClient;
 import com.codewarp.llm.LLMClient;
+import com.codewarp.memory.MemoryContextProvider;
+import com.codewarp.memory.MemoryStore;
 import com.codewarp.permissions.ToolPermissionConfig;
 import com.codewarp.permissions.ToolPermissionManager;
 import com.codewarp.terminal.TerminalSession;
@@ -12,11 +14,14 @@ import com.codewarp.tools.BashTool;
 import com.codewarp.tools.EditTool;
 import com.codewarp.tools.GlobTool;
 import com.codewarp.tools.GrepTool;
+import com.codewarp.tools.MemoryReadTool;
 import com.codewarp.tools.ReadTool;
 import com.codewarp.tools.Tool;
 import com.codewarp.tools.WriteTool;
 import com.codewarp.util.Console;
 
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -62,21 +67,36 @@ public class CodeWarp {
                 settings.maxTokens()
         );
 
-        List<Tool> tools = List.of(
-                new ReadTool(),
-                new WriteTool(),
-                new EditTool(),
-                new BashTool(),
-                new GrepTool(),
-                new GlobTool()
-        );
+        List<Tool> tools = new ArrayList<>();
+        tools.add(new ReadTool());
+        tools.add(new WriteTool());
+        tools.add(new EditTool());
+        tools.add(new BashTool());
+        tools.add(new GrepTool());
+        tools.add(new GlobTool());
+
+        MemoryContextProvider memoryContextProvider = null;
+        MemoryStore memoryStore = new MemoryStore();
+        try {
+            memoryStore.initialize();
+            memoryContextProvider = new MemoryContextProvider(memoryStore);
+            tools.add(new MemoryReadTool(memoryStore));
+        } catch (IOException e) {
+            Console.warn("[Memory] 初始化失败，已禁用记忆系统: " + e.getMessage());
+        }
 
         ToolPermissionConfig toolPermissionConfig = new ToolPermissionConfig(settings.resolvedToolPermissions());
         ToolPermissionManager toolPermissionManager = new ToolPermissionManager(
                 toolPermissionConfig,
                 settings.resolvedPermissionMode()
         );
-        QueryEngine queryEngine = new QueryEngine(llmClient, tools, settings.maxIterations(), toolPermissionManager);
+        QueryEngine queryEngine = new QueryEngine(
+                llmClient,
+                tools,
+                settings.maxIterations(),
+                toolPermissionManager,
+                memoryContextProvider
+        );
 
         // 启动终端交互
         new TerminalSession(queryEngine, llmClient, configManager, settings, toolPermissionManager).run();

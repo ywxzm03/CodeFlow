@@ -145,6 +145,7 @@ public record Settings(
         permissions.put("Bash", ToolPermission.ASK);
         permissions.put("Grep", ToolPermission.ASK);
         permissions.put("Glob", ToolPermission.ASK);
+        permissions.put("MemoryRead", ToolPermission.ASK);
         return permissions;
     }
 }

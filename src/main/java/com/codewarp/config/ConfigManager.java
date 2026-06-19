@@ -100,7 +100,8 @@ public class ConfigManager {
                     "Edit": "ask",
                     "Bash": "ask",
                     "Grep": "ask",
-                    "Glob": "ask"
+                    "Glob": "ask",
+                    "MemoryRead": "ask"
                   }
                 }
                 """;
