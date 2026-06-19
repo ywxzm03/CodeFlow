@@ -31,14 +31,15 @@ class MemoryContextProviderTest {
     }
 
     @Test
-    void injectsTranscriptSessionWhenAvailable() throws Exception {
+    void injectsTranscriptPathWhenAvailable() throws Exception {
         MemoryStore store = new MemoryStore(tempDir.resolve("memory"));
         store.initialize();
 
-        String prompt = new MemoryContextProvider(store, () -> "session-a").buildSystemPrompt("base prompt");
+        String prompt = new MemoryContextProvider(store, () -> "/tmp/session-a.jsonl").buildSystemPrompt("base prompt");
 
-        assertTrue(prompt.contains("Current transcript session id: session-a"));
-        assertTrue(prompt.contains("TranscriptSearch"));
+        assertTrue(prompt.contains("Current transcript path: /tmp/session-a.jsonl"));
+        assertTrue(prompt.contains("Grep"));
+        assertTrue(prompt.contains("Read"));
     }
 
     @Test

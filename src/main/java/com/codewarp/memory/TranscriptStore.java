@@ -16,7 +16,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -27,7 +26,6 @@ public final class TranscriptStore {
     private static final String L5_DIR = "L5";
     private static final String JSONL_EXTENSION = ".jsonl";
     private static final String SAFE_SESSION_ID_PATTERN = "[A-Za-z0-9_.-]+";
-    private static final int MAX_SEARCH_LIMIT = 100;
 
     private final Path transcriptRoot;
     private final ObjectMapper objectMapper;
@@ -134,32 +132,6 @@ public final class TranscriptStore {
         }
     }
 
-    public List<TranscriptSearchResult> search(String sessionId, String keyword, int limit) throws IOException {
-        validateSessionId(sessionId);
-        String normalizedKeyword = requireText(keyword, "搜索关键字不能为空").toLowerCase(Locale.ROOT);
-        if (limit < 1 || limit > MAX_SEARCH_LIMIT) {
-            throw new IllegalArgumentException("搜索结果数量必须在 1 到 " + MAX_SEARCH_LIMIT + " 之间");
-        }
-
-        List<TranscriptSearchResult> results = new ArrayList<>();
-        for (TranscriptEntry entry : loadEntries(sessionId)) {
-            String text = messageText(entry.message());
-            if (text.toLowerCase(Locale.ROOT).contains(normalizedKeyword)) {
-                results.add(new TranscriptSearchResult(
-                        entry.sessionId(),
-                        entry.uuid(),
-                        entry.timestamp(),
-                        entry.message().role(),
-                        text
-                ));
-                if (results.size() >= limit) {
-                    break;
-                }
-            }
-        }
-        return List.copyOf(results);
-    }
-
     public void validateSessionId(String sessionId) {
         if (sessionId == null || sessionId.isBlank()) {
             throw new IllegalArgumentException("sessionId 不能为空");
@@ -167,6 +139,11 @@ public final class TranscriptStore {
         if (!sessionId.matches(SAFE_SESSION_ID_PATTERN) || ".".equals(sessionId) || "..".equals(sessionId)) {
             throw new IllegalArgumentException("sessionId 只能包含字母、数字、下划线、短横线和点: " + sessionId);
         }
+    }
+
+    public Path transcriptPath(String sessionId) {
+        validateSessionId(sessionId);
+        return sessionPath(sessionId);
     }
 
     private ObjectNode toJson(TranscriptEntry entry) {
@@ -310,30 +287,6 @@ public final class TranscriptStore {
 
     private static Path defaultTranscriptRoot() {
         return Paths.get(System.getProperty("user.home"), CONFIG_DIR_NAME, MEMORY_DIR_NAME, L5_DIR);
-    }
-
-    private static String messageText(Message message) {
-        return switch (message) {
-            case Message.User user -> user.content();
-            case Message.Assistant assistant -> {
-                StringBuilder builder = new StringBuilder();
-                if (assistant.content() != null) {
-                    builder.append(assistant.content());
-                }
-                if (assistant.toolUses() != null && !assistant.toolUses().isEmpty()) {
-                    builder.append(" tool_uses=").append(assistant.toolUses());
-                }
-                yield builder.toString();
-            }
-            case Message.ToolResult toolResult -> toolResult.content();
-        };
-    }
-
-    private static String requireText(String value, String message) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(message);
-        }
-        return value;
     }
 
     private static String requiredText(JsonNode node, String field) {

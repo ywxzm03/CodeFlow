@@ -102,8 +102,16 @@ public class GrepTool implements Tool {
             }
 
             // 搜索文件
-            PathMatcher fileMatcher = FileSystems.getDefault().getPathMatcher("glob:" + globPattern);
             List<SearchResult> results = new ArrayList<>();
+            if (Files.isRegularFile(root)) {
+                collectMatches(root, pattern, results);
+                return formatOutput(results, outputMode);
+            }
+            if (!Files.isDirectory(root)) {
+                return ToolExecutionResult.error("根路径不是文件或目录: " + rootPath);
+            }
+
+            PathMatcher fileMatcher = FileSystems.getDefault().getPathMatcher("glob:" + globPattern);
 
             Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
                 @Override
@@ -120,25 +128,7 @@ public class GrepTool implements Tool {
                         return FileVisitResult.CONTINUE;
                     }
 
-                    try {
-                        List<String> lines = Files.readAllLines(file);
-                        List<MatchedLine> matchedLines = new ArrayList<>();
-
-                        for (int i = 0; i < lines.size(); i++) {
-                            String line = lines.get(i);
-                            Matcher matcher = pattern.matcher(line);
-                            if (matcher.find()) {
-                                matchedLines.add(new MatchedLine(i + 1, line));
-                            }
-                        }
-
-                        if (!matchedLines.isEmpty()) {
-                            results.add(new SearchResult(file.toString(), matchedLines));
-                        }
-
-                    } catch (IOException e) {
-                        // 忽略无法读取的文件
-                    }
+                    collectMatches(file, pattern, results);
 
                     return FileVisitResult.CONTINUE;
                 }
@@ -154,6 +144,31 @@ public class GrepTool implements Tool {
 
         } catch (Exception e) {
             return ToolExecutionResult.error("搜索失败: " + e.getMessage());
+        }
+    }
+
+    private void collectMatches(Path file, Pattern pattern, List<SearchResult> results) {
+        if (isBinaryFile(file)) {
+            return;
+        }
+
+        try {
+            List<String> lines = Files.readAllLines(file);
+            List<MatchedLine> matchedLines = new ArrayList<>();
+
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i);
+                Matcher matcher = pattern.matcher(line);
+                if (matcher.find()) {
+                    matchedLines.add(new MatchedLine(i + 1, line));
+                }
+            }
+
+            if (!matchedLines.isEmpty()) {
+                results.add(new SearchResult(file.toString(), matchedLines));
+            }
+        } catch (IOException e) {
+            // Ignore unreadable files.
         }
     }
 

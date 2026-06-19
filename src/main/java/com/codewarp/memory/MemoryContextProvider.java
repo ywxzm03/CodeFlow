@@ -8,15 +8,15 @@ import java.util.function.Supplier;
 public class MemoryContextProvider {
 
     private final MemoryStore memoryStore;
-    private final Supplier<String> transcriptSessionIdSupplier;
+    private final Supplier<String> transcriptPathSupplier;
 
     public MemoryContextProvider(MemoryStore memoryStore) {
         this(memoryStore, null);
     }
 
-    public MemoryContextProvider(MemoryStore memoryStore, Supplier<String> transcriptSessionIdSupplier) {
+    public MemoryContextProvider(MemoryStore memoryStore, Supplier<String> transcriptPathSupplier) {
         this.memoryStore = memoryStore;
-        this.transcriptSessionIdSupplier = transcriptSessionIdSupplier;
+        this.transcriptPathSupplier = transcriptPathSupplier;
     }
 
     public String buildSystemPrompt(String baseSystemPrompt) {
@@ -50,25 +50,26 @@ public class MemoryContextProvider {
     }
 
     private String transcriptContext() {
-        String sessionId = currentTranscriptSessionId();
-        if (sessionId == null || sessionId.isBlank()) {
+        String transcriptPath = currentTranscriptPath();
+        if (transcriptPath == null || transcriptPath.isBlank()) {
             return "";
         }
         return """
 
                 L5 stores full session transcripts as jsonl files.
-                Current transcript session id: %s
+                Current transcript path: %s
                 Do not assume L4 contains all historical details after resume or future compaction.
-                When historical details are needed, use TranscriptSearch with a session_id and keyword.
-                """.formatted(sessionId);
+                When historical details are needed, search or read the transcript file using narrow terms such as error messages, file paths, function names, or exact phrases.
+                Prefer existing file tools such as Grep and Read instead of reading the entire transcript unless necessary.
+                """.formatted(transcriptPath);
     }
 
-    private String currentTranscriptSessionId() {
-        if (transcriptSessionIdSupplier == null) {
+    private String currentTranscriptPath() {
+        if (transcriptPathSupplier == null) {
             return null;
         }
         try {
-            return transcriptSessionIdSupplier.get();
+            return transcriptPathSupplier.get();
         } catch (RuntimeException e) {
             return null;
         }

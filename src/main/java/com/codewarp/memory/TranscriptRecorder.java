@@ -32,6 +32,13 @@ public final class TranscriptRecorder {
         return sessionId;
     }
 
+    public String transcriptPath() {
+        if (!enabled()) {
+            return "";
+        }
+        return transcriptStore.transcriptPath(sessionId).toString();
+    }
+
     public void record(List<Message> messages) {
         if (!enabled() || messages == null || messages.isEmpty()) {
             return;

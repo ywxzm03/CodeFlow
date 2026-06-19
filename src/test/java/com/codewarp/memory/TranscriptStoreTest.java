@@ -72,37 +72,19 @@ class TranscriptStoreTest {
     }
 
     @Test
-    void searchesTranscriptByKeyword() throws Exception {
-        TranscriptStore store = initializedStore();
-        store.append("session-a", List.of(
-                new Message.User("permission mode"),
-                new Message.Assistant("other", List.of())
-        ));
-
-        List<TranscriptSearchResult> results = store.search("session-a", "permission", 20);
-
-        assertEquals(1, results.size());
-        assertEquals("user", results.getFirst().role());
-        assertTrue(results.getFirst().content().contains("permission"));
-    }
-
-    @Test
     void rejectsUnsafeSessionIds() throws Exception {
         TranscriptStore store = initializedStore();
 
         assertThrows(IllegalArgumentException.class, () -> store.append("../bad", List.of(new Message.User("x"))));
         assertThrows(IllegalArgumentException.class, () -> store.loadMessages("/tmp/bad"));
-        assertThrows(IllegalArgumentException.class, () -> store.search("..", "x", 1));
+        assertThrows(IllegalArgumentException.class, () -> store.transcriptPath(".."));
     }
 
     @Test
-    void rejectsInvalidSearchInput() throws Exception {
+    void resolvesTranscriptPathUnderL5Root() throws Exception {
         TranscriptStore store = initializedStore();
-        store.append("session-a", List.of(new Message.User("hello")));
 
-        assertThrows(IllegalArgumentException.class, () -> store.search("session-a", "", 1));
-        assertThrows(IllegalArgumentException.class, () -> store.search("session-a", "hello", 0));
-        assertThrows(IllegalArgumentException.class, () -> store.search("session-a", "hello", 101));
+        assertEquals(tempDir.resolve("memory/L5/session-a.jsonl"), store.transcriptPath("session-a"));
     }
 
     @Test

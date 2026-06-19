@@ -20,7 +20,6 @@ import com.codewarp.tools.GrepTool;
 import com.codewarp.tools.MemoryReadTool;
 import com.codewarp.tools.ReadTool;
 import com.codewarp.tools.Tool;
-import com.codewarp.tools.TranscriptSearchTool;
 import com.codewarp.tools.WriteTool;
 import com.codewarp.util.Console;
 
@@ -86,7 +85,6 @@ public class CodeWarp {
             initializedTranscriptStore.initialize();
             transcriptStore = initializedTranscriptStore;
             transcriptRecorder = new TranscriptRecorder(transcriptStore);
-            tools.add(new TranscriptSearchTool(transcriptStore));
         } catch (IOException e) {
             Console.warn("[Memory] L5 transcript 初始化失败，已禁用 transcript: " + e.getMessage());
         }
@@ -97,7 +95,7 @@ public class CodeWarp {
         TranscriptRecorder activeTranscriptRecorder = transcriptRecorder;
         try {
             memoryStore.initialize();
-            memoryContextProvider = new MemoryContextProvider(memoryStore, activeTranscriptRecorder::sessionId);
+            memoryContextProvider = new MemoryContextProvider(memoryStore, activeTranscriptRecorder::transcriptPath);
             memoryReflection = new MemoryReflection(llmClient, memoryStore);
             tools.add(new MemoryReadTool(memoryStore));
         } catch (IOException e) {
