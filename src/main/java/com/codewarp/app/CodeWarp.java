@@ -20,6 +20,7 @@ import com.codewarp.tools.GrepTool;
 import com.codewarp.tools.MemoryReadTool;
 import com.codewarp.tools.ReadTool;
 import com.codewarp.tools.Tool;
+import com.codewarp.tools.TranscriptSearchTool;
 import com.codewarp.tools.WriteTool;
 import com.codewarp.util.Console;
 
@@ -78,25 +79,29 @@ public class CodeWarp {
         tools.add(new GrepTool());
         tools.add(new GlobTool());
 
+        TranscriptStore transcriptStore = null;
+        TranscriptRecorder transcriptRecorder = TranscriptRecorder.disabled();
+        TranscriptStore initializedTranscriptStore = new TranscriptStore();
+        try {
+            initializedTranscriptStore.initialize();
+            transcriptStore = initializedTranscriptStore;
+            transcriptRecorder = new TranscriptRecorder(transcriptStore);
+            tools.add(new TranscriptSearchTool(transcriptStore));
+        } catch (IOException e) {
+            Console.warn("[Memory] L5 transcript 初始化失败，已禁用 transcript: " + e.getMessage());
+        }
+
         MemoryContextProvider memoryContextProvider = null;
         MemoryReflection memoryReflection = null;
         MemoryStore memoryStore = new MemoryStore();
+        TranscriptRecorder activeTranscriptRecorder = transcriptRecorder;
         try {
             memoryStore.initialize();
-            memoryContextProvider = new MemoryContextProvider(memoryStore);
+            memoryContextProvider = new MemoryContextProvider(memoryStore, activeTranscriptRecorder::sessionId);
             memoryReflection = new MemoryReflection(llmClient, memoryStore);
             tools.add(new MemoryReadTool(memoryStore));
         } catch (IOException e) {
             Console.warn("[Memory] 初始化失败，已禁用记忆系统: " + e.getMessage());
-        }
-
-        TranscriptRecorder transcriptRecorder = TranscriptRecorder.disabled();
-        TranscriptStore transcriptStore = new TranscriptStore();
-        try {
-            transcriptStore.initialize();
-            transcriptRecorder = new TranscriptRecorder(transcriptStore);
-        } catch (IOException e) {
-            Console.warn("[Memory] L5 transcript 初始化失败，已禁用 transcript: " + e.getMessage());
         }
 
         ToolPermissionConfig toolPermissionConfig = new ToolPermissionConfig(settings.resolvedToolPermissions());

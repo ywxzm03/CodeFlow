@@ -31,6 +31,17 @@ class MemoryContextProviderTest {
     }
 
     @Test
+    void injectsTranscriptSessionWhenAvailable() throws Exception {
+        MemoryStore store = new MemoryStore(tempDir.resolve("memory"));
+        store.initialize();
+
+        String prompt = new MemoryContextProvider(store, () -> "session-a").buildSystemPrompt("base prompt");
+
+        assertTrue(prompt.contains("Current transcript session id: session-a"));
+        assertTrue(prompt.contains("TranscriptSearch"));
+    }
+
+    @Test
     void fallsBackWhenRulesOrIndexCannotBeRead() {
         MemoryStore store = new MemoryStore(tempDir.resolve("missing"));
 
