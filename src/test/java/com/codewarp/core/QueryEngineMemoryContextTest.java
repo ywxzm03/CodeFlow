@@ -34,7 +34,7 @@ class QueryEngineMemoryContextTest {
                 new MemoryContextProvider(store)
         );
 
-        QueryEngine.QueryResult result = queryEngine.query("hello");
+        QueryEngine.QueryResult result = queryEngine.query("hello", new WorkingMemory());
 
         assertEquals(QueryEngine.QueryResult.StopReason.COMPLETED, result.stopReason());
         assertTrue(systemPrompt.get().contains("### Memory"));
