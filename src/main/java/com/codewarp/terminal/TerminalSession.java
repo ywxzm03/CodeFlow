@@ -2,6 +2,7 @@ package com.codewarp.terminal;
 
 import com.codewarp.config.ConfigManager;
 import com.codewarp.config.Settings;
+import com.codewarp.core.ConversationSession;
 import com.codewarp.core.QueryEngine;
 import com.codewarp.llm.LLMClient;
 import com.codewarp.memory.MemoryReflection;
@@ -32,7 +33,7 @@ public final class TerminalSession implements AutoCloseable {
     private static final String BLUE = "\u001B[34;1m";
     private static final String RESET = "\u001B[0m";
 
-    private final QueryEngine queryEngine;
+    private final ConversationSession conversationSession;
     private final LLMClient llmClient;
     private final ConfigManager configManager;
     private final SlashCommandRegistry slashCommands;
@@ -97,7 +98,7 @@ public final class TerminalSession implements AutoCloseable {
             ToolPermissionManager toolPermissionManager,
             MemoryReflection memoryReflection
     ) {
-        this.queryEngine = queryEngine;
+        this.conversationSession = new ConversationSession(queryEngine, memoryReflection);
         this.llmClient = llmClient;
         this.configManager = configManager;
         this.settings = settings;
@@ -211,12 +212,9 @@ public final class TerminalSession implements AutoCloseable {
         }
 
         try {
-            QueryEngine.QueryResult result = queryEngine.query(input);
+            QueryEngine.QueryResult result = conversationSession.handleUserInput(input);
             terminal.writer().println(result.finalResponse());
             terminal.writer().flush();
-            if (memoryReflection != null && result.stopReason() == QueryEngine.QueryResult.StopReason.COMPLETED) {
-                memoryReflection.reflect(result.messages());
-            }
         } catch (Exception e) {
             terminal.writer().println();
             terminal.writer().println("Error: " + e.getMessage());
@@ -228,6 +226,11 @@ public final class TerminalSession implements AutoCloseable {
     private void handleSlashCommand(String input) {
         if ("/".equals(input)) {
             printSlashCommandList(slashCommands.commands());
+            return;
+        }
+
+        if ("/clear".equals(input)) {
+            handleClearCommand();
             return;
         }
 
@@ -257,6 +260,14 @@ public final class TerminalSession implements AutoCloseable {
             terminal.writer().println("Type / to see available commands.");
             terminal.writer().flush();
         });
+    }
+
+    private void handleClearCommand() {
+        conversationSession.clear();
+        terminal.puts(InfoCmp.Capability.clear_screen);
+        terminal.flush();
+        terminal.writer().println("Working memory cleared.");
+        terminal.writer().flush();
     }
 
     private void handleModelCommand() {

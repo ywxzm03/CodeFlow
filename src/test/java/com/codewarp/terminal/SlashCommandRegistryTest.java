@@ -25,7 +25,7 @@ class SlashCommandRegistryTest {
                 .map(SlashCommand::displayName)
                 .toList();
 
-        assertEquals(List.of("/exit", "/help", "/model", "/permissions"), matches);
+        assertEquals(List.of("/clear", "/exit", "/help", "/model", "/permissions"), matches);
     }
 
     @Test
@@ -57,7 +57,7 @@ class SlashCommandRegistryTest {
         reader.getBuffer().write("/");
         completer.complete(reader, null, candidates);
 
-        assertEquals(List.of("/exit", "/help", "/model", "/permissions"), candidateValues(candidates));
+        assertEquals(List.of("/clear", "/exit", "/help", "/model", "/permissions"), candidateValues(candidates));
     }
 
     @Test
@@ -147,6 +147,7 @@ class SlashCommandRegistryTest {
                 new SlashCommand("help", "Show help", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("model", "Show model", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("permissions", "Select permission mode", (context, arguments) -> SlashCommand.Result.CONTINUE),
+                new SlashCommand("clear", "Clear working memory", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("exit", "Exit", (context, arguments) -> SlashCommand.Result.EXIT)
         ));
     }

@@ -19,6 +19,7 @@ public final class SlashCommandRegistry {
 
     public static SlashCommandRegistry defaults(String modelName) {
         List<SlashCommand> commands = new ArrayList<>();
+        commands.add(new SlashCommand("clear", "Clear working memory and terminal screen", (context, arguments) -> SlashCommand.Result.CONTINUE));
         commands.add(new SlashCommand("exit", "Exit CodeWarp", (context, arguments) -> {
             context.requestExit();
             return SlashCommand.Result.EXIT;
