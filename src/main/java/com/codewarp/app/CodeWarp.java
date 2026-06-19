@@ -8,6 +8,8 @@ import com.codewarp.llm.LLMClient;
 import com.codewarp.memory.MemoryContextProvider;
 import com.codewarp.memory.MemoryReflection;
 import com.codewarp.memory.MemoryStore;
+import com.codewarp.memory.TranscriptRecorder;
+import com.codewarp.memory.TranscriptStore;
 import com.codewarp.permissions.ToolPermissionConfig;
 import com.codewarp.permissions.ToolPermissionManager;
 import com.codewarp.terminal.TerminalSession;
@@ -88,6 +90,15 @@ public class CodeWarp {
             Console.warn("[Memory] 初始化失败，已禁用记忆系统: " + e.getMessage());
         }
 
+        TranscriptRecorder transcriptRecorder = TranscriptRecorder.disabled();
+        TranscriptStore transcriptStore = new TranscriptStore();
+        try {
+            transcriptStore.initialize();
+            transcriptRecorder = new TranscriptRecorder(transcriptStore);
+        } catch (IOException e) {
+            Console.warn("[Memory] L5 transcript 初始化失败，已禁用 transcript: " + e.getMessage());
+        }
+
         ToolPermissionConfig toolPermissionConfig = new ToolPermissionConfig(settings.resolvedToolPermissions());
         ToolPermissionManager toolPermissionManager = new ToolPermissionManager(
                 toolPermissionConfig,
@@ -102,7 +113,7 @@ public class CodeWarp {
         );
 
         // 启动终端交互
-        new TerminalSession(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection).run();
+        new TerminalSession(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, transcriptRecorder).run();
     }
 
     private static void silenceLibraryLogging() {

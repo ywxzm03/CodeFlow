@@ -7,6 +7,7 @@ import com.codewarp.core.QueryEngine;
 import com.codewarp.llm.LLMClient;
 import com.codewarp.memory.MemoryReflection;
 import com.codewarp.memory.MemoryUpdate;
+import com.codewarp.memory.TranscriptRecorder;
 import com.codewarp.permissions.PermissionMode;
 import com.codewarp.permissions.ToolPermissionManager;
 import org.jline.reader.EndOfFileException;
@@ -39,6 +40,7 @@ public final class TerminalSession implements AutoCloseable {
     private final SlashCommandRegistry slashCommands;
     private final ToolPermissionManager toolPermissionManager;
     private final MemoryReflection memoryReflection;
+    private final TranscriptRecorder transcriptRecorder;
     private final AtomicBoolean exitRequested = new AtomicBoolean(false);
     private Settings settings;
 
@@ -71,7 +73,19 @@ public final class TerminalSession implements AutoCloseable {
             ToolPermissionManager toolPermissionManager,
             MemoryReflection memoryReflection
     ) {
-        this(queryEngine, llmClient, configManager, settings, SlashCommandRegistry.defaults(settings.resolvedModel()), toolPermissionManager, memoryReflection);
+        this(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, null);
+    }
+
+    public TerminalSession(
+            QueryEngine queryEngine,
+            LLMClient llmClient,
+            ConfigManager configManager,
+            Settings settings,
+            ToolPermissionManager toolPermissionManager,
+            MemoryReflection memoryReflection,
+            TranscriptRecorder transcriptRecorder
+    ) {
+        this(queryEngine, llmClient, configManager, settings, SlashCommandRegistry.defaults(settings.resolvedModel()), toolPermissionManager, memoryReflection, transcriptRecorder);
     }
 
     TerminalSession(QueryEngine queryEngine, SlashCommandRegistry slashCommands) {
@@ -98,7 +112,21 @@ public final class TerminalSession implements AutoCloseable {
             ToolPermissionManager toolPermissionManager,
             MemoryReflection memoryReflection
     ) {
-        this.conversationSession = new ConversationSession(queryEngine, memoryReflection);
+        this(queryEngine, llmClient, configManager, settings, slashCommands, toolPermissionManager, memoryReflection, null);
+    }
+
+    TerminalSession(
+            QueryEngine queryEngine,
+            LLMClient llmClient,
+            ConfigManager configManager,
+            Settings settings,
+            SlashCommandRegistry slashCommands,
+            ToolPermissionManager toolPermissionManager,
+            MemoryReflection memoryReflection,
+            TranscriptRecorder transcriptRecorder
+    ) {
+        this.transcriptRecorder = transcriptRecorder == null ? TranscriptRecorder.disabled() : transcriptRecorder;
+        this.conversationSession = new ConversationSession(queryEngine, memoryReflection, this.transcriptRecorder);
         this.llmClient = llmClient;
         this.configManager = configManager;
         this.settings = settings;
