@@ -69,8 +69,19 @@ public class QueryEngine {
      * 主循环：处理用户输入并返回最终响应
      */
     public QueryResult query(String userInput) {
-        List<Message> messages = new ArrayList<>();
-        messages.add(new Message.User(userInput));
+        return query(userInput, new WorkingMemory());
+    }
+
+    /**
+     * 主循环：处理用户输入并写入会话级工作记忆。
+     */
+    public QueryResult query(String userInput, WorkingMemory workingMemory) {
+        if (workingMemory == null) {
+            throw new IllegalArgumentException("workingMemory must not be null");
+        }
+
+        int startIndex = workingMemory.size();
+        workingMemory.append(new Message.User(userInput));
 
         int iteration = 0;
 
@@ -80,7 +91,7 @@ public class QueryEngine {
             Console.info("\n[Iteration " + iteration + "] 调用LLM...");
 
             // 流式执行模式
-            QueryResult result = executeStreamingIteration(messages, iteration);
+            QueryResult result = executeStreamingIteration(workingMemory, startIndex, iteration);
             if (result != null) {
                 return result;
             }
@@ -88,9 +99,11 @@ public class QueryEngine {
 
         // 达到最大迭代次数
         Console.warn("\n[警告] 达到最大迭代次数: " + maxIterations);
+        List<Message> turnMessages = workingMemory.sliceFrom(startIndex);
         return new QueryResult(
             "达到最大迭代次数限制",
-            messages,
+            workingMemory.snapshot(),
+            turnMessages,
             iteration,
             QueryResult.StopReason.MAX_ITERATIONS
         );
@@ -99,7 +112,7 @@ public class QueryEngine {
     /**
      * 流式执行模式的迭代
      */
-    private QueryResult executeStreamingIteration(List<Message> messages, int iteration) {
+    private QueryResult executeStreamingIteration(WorkingMemory workingMemory, int startIndex, int iteration) {
         // 创建流式工具执行器
         StreamingToolExecutor executor = new StreamingToolExecutor(tools, toolPermissionManager);
         String systemPrompt = memoryContextProvider == null
@@ -112,7 +125,7 @@ public class QueryEngine {
 
 
             try {
-                llmClient.callStreaming(systemPrompt, messages, tools)
+                llmClient.callStreaming(systemPrompt, workingMemory.snapshot(), tools)
                         .doOnNext(event -> {
                             switch (event) {
                                 case LLMClient.StreamEvent.TextDelta delta -> contentBuilder.append(delta.text());
@@ -128,10 +141,12 @@ public class QueryEngine {
             } catch (RuntimeException streamError) {
                 // 流式中断：取消已启动的工具，丢弃本轮所有副作用，不写入半截消息
                 executor.discard();
+                workingMemory.rollbackTo(startIndex);
                 Console.warn("\n[错误] 流式中断，已丢弃本轮工具执行: " + streamError.getMessage());
                 return new QueryResult(
                     "流式调用失败: " + streamError.getMessage(),
-                    messages,
+                    workingMemory.snapshot(),
+                    List.of(),
                     iteration,
                     QueryResult.StopReason.ERROR
                 );
@@ -143,12 +158,18 @@ public class QueryEngine {
             }
 
             // 先添加 assistant 消息（含全部 tool_use），保证 tool result 跟在它之后
-            messages.add(new Message.Assistant(content, allToolUses));
+            workingMemory.append(new Message.Assistant(content, allToolUses));
 
             // 没有工具调用 -> 对话结束
             if (allToolUses.isEmpty()) {
                 Console.info("\n[完成] 没有更多工具调用，对话结束");
-                return new QueryResult(content, messages, iteration, QueryResult.StopReason.COMPLETED);
+                return new QueryResult(
+                        content,
+                        workingMemory.snapshot(),
+                        workingMemory.sliceFrom(startIndex),
+                        iteration,
+                        QueryResult.StopReason.COMPLETED
+                );
             }
 
             // 等待所有工具完成，按 tool_use 的原始顺序回填结果
@@ -160,7 +181,7 @@ public class QueryEngine {
             for (Message.ToolUse tu : allToolUses) {
                 StreamingToolExecutor.ToolResult result = resultsById.get(tu.id());
                 if (result != null) {
-                    messages.add(new Message.ToolResult(result.toolUseId(), result.content(), result.isError()));
+                    workingMemory.append(new Message.ToolResult(result.toolUseId(), result.content(), result.isError()));
                 }
             }
 
@@ -178,6 +199,7 @@ public class QueryEngine {
     public record QueryResult(
             String finalResponse,
             List<Message> messages,
+            List<Message> turnMessages,
             int iterations,
             StopReason stopReason
     ) {
