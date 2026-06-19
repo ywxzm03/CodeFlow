@@ -33,6 +33,7 @@ public final class SlashCommandRegistry {
             return SlashCommand.Result.CONTINUE;
         }));
         commands.add(new SlashCommand("permissions", "Select permission mode", (context, arguments) -> SlashCommand.Result.CONTINUE));
+        commands.add(new SlashCommand("resume", "Resume a transcript session", (context, arguments) -> SlashCommand.Result.CONTINUE));
         return new SlashCommandRegistry(commands);
     }
 

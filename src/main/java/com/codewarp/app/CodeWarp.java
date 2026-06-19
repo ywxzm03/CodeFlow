@@ -118,7 +118,7 @@ public class CodeWarp {
         );
 
         // 启动终端交互
-        new TerminalSession(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, transcriptRecorder).run();
+        new TerminalSession(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, transcriptRecorder, transcriptStore).run();
     }
 
     private static void silenceLibraryLogging() {

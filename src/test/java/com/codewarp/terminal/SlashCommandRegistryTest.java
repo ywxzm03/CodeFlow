@@ -1,6 +1,7 @@
 package com.codewarp.terminal;
 
 import com.codewarp.config.Settings;
+import com.codewarp.memory.TranscriptSession;
 import com.codewarp.permissions.PermissionMode;
 import org.jline.reader.Candidate;
 import org.jline.reader.LineReaderBuilder;
@@ -25,7 +26,7 @@ class SlashCommandRegistryTest {
                 .map(SlashCommand::displayName)
                 .toList();
 
-        assertEquals(List.of("/clear", "/exit", "/help", "/model", "/permissions"), matches);
+        assertEquals(List.of("/clear", "/exit", "/help", "/model", "/permissions", "/resume"), matches);
     }
 
     @Test
@@ -57,7 +58,7 @@ class SlashCommandRegistryTest {
         reader.getBuffer().write("/");
         completer.complete(reader, null, candidates);
 
-        assertEquals(List.of("/clear", "/exit", "/help", "/model", "/permissions"), candidateValues(candidates));
+        assertEquals(List.of("/clear", "/exit", "/help", "/model", "/permissions", "/resume"), candidateValues(candidates));
     }
 
     @Test
@@ -84,6 +85,19 @@ class SlashCommandRegistryTest {
         completer.complete(reader, null, candidates);
 
         assertEquals(List.of("/permissions"), candidateValues(candidates));
+    }
+
+    @Test
+    void completerFiltersResumeCommandAsUserTypes() {
+        SlashCommandRegistry registry = registry();
+        SlashCommandCompleter completer = new SlashCommandCompleter(registry);
+        List<Candidate> candidates = new ArrayList<>();
+        var reader = LineReaderBuilder.builder().build();
+
+        reader.getBuffer().write("/re");
+        completer.complete(reader, null, candidates);
+
+        assertEquals(List.of("/resume"), candidateValues(candidates));
     }
 
     @Test
@@ -142,11 +156,26 @@ class SlashCommandRegistryTest {
                 .toList());
     }
 
+    @Test
+    void transcriptSessionOptionsUseSessionIdAndMessageCount() {
+        List<TerminalSession.TranscriptSessionOption> options = TerminalSession.transcriptSessionOptions(List.of(
+                new TranscriptSession("session-a", "time", 3)
+        ));
+
+        assertEquals(List.of("session-a"), options.stream()
+                .map(TerminalSession.TranscriptSessionOption::sessionId)
+                .toList());
+        assertEquals(List.of("session-a (3 messages)"), options.stream()
+                .map(TerminalSession.TranscriptSessionOption::label)
+                .toList());
+    }
+
     private SlashCommandRegistry registry() {
         return new SlashCommandRegistry(List.of(
                 new SlashCommand("help", "Show help", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("model", "Show model", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("permissions", "Select permission mode", (context, arguments) -> SlashCommand.Result.CONTINUE),
+                new SlashCommand("resume", "Resume session", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("clear", "Clear working memory", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("exit", "Exit", (context, arguments) -> SlashCommand.Result.EXIT)
         ));

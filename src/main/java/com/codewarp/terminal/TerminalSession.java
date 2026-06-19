@@ -3,11 +3,14 @@ package com.codewarp.terminal;
 import com.codewarp.config.ConfigManager;
 import com.codewarp.config.Settings;
 import com.codewarp.core.ConversationSession;
+import com.codewarp.core.Message;
 import com.codewarp.core.QueryEngine;
 import com.codewarp.llm.LLMClient;
 import com.codewarp.memory.MemoryReflection;
 import com.codewarp.memory.MemoryUpdate;
 import com.codewarp.memory.TranscriptRecorder;
+import com.codewarp.memory.TranscriptSession;
+import com.codewarp.memory.TranscriptStore;
 import com.codewarp.permissions.PermissionMode;
 import com.codewarp.permissions.ToolPermissionManager;
 import org.jline.reader.EndOfFileException;
@@ -41,6 +44,7 @@ public final class TerminalSession implements AutoCloseable {
     private final ToolPermissionManager toolPermissionManager;
     private final MemoryReflection memoryReflection;
     private final TranscriptRecorder transcriptRecorder;
+    private final TranscriptStore transcriptStore;
     private final AtomicBoolean exitRequested = new AtomicBoolean(false);
     private Settings settings;
 
@@ -85,7 +89,20 @@ public final class TerminalSession implements AutoCloseable {
             MemoryReflection memoryReflection,
             TranscriptRecorder transcriptRecorder
     ) {
-        this(queryEngine, llmClient, configManager, settings, SlashCommandRegistry.defaults(settings.resolvedModel()), toolPermissionManager, memoryReflection, transcriptRecorder);
+        this(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, transcriptRecorder, null);
+    }
+
+    public TerminalSession(
+            QueryEngine queryEngine,
+            LLMClient llmClient,
+            ConfigManager configManager,
+            Settings settings,
+            ToolPermissionManager toolPermissionManager,
+            MemoryReflection memoryReflection,
+            TranscriptRecorder transcriptRecorder,
+            TranscriptStore transcriptStore
+    ) {
+        this(queryEngine, llmClient, configManager, settings, SlashCommandRegistry.defaults(settings.resolvedModel()), toolPermissionManager, memoryReflection, transcriptRecorder, transcriptStore);
     }
 
     TerminalSession(QueryEngine queryEngine, SlashCommandRegistry slashCommands) {
@@ -125,6 +142,20 @@ public final class TerminalSession implements AutoCloseable {
             MemoryReflection memoryReflection,
             TranscriptRecorder transcriptRecorder
     ) {
+        this(queryEngine, llmClient, configManager, settings, slashCommands, toolPermissionManager, memoryReflection, transcriptRecorder, null);
+    }
+
+    TerminalSession(
+            QueryEngine queryEngine,
+            LLMClient llmClient,
+            ConfigManager configManager,
+            Settings settings,
+            SlashCommandRegistry slashCommands,
+            ToolPermissionManager toolPermissionManager,
+            MemoryReflection memoryReflection,
+            TranscriptRecorder transcriptRecorder,
+            TranscriptStore transcriptStore
+    ) {
         this.transcriptRecorder = transcriptRecorder == null ? TranscriptRecorder.disabled() : transcriptRecorder;
         this.conversationSession = new ConversationSession(queryEngine, memoryReflection, this.transcriptRecorder);
         this.llmClient = llmClient;
@@ -133,6 +164,7 @@ public final class TerminalSession implements AutoCloseable {
         this.slashCommands = slashCommands;
         this.toolPermissionManager = toolPermissionManager;
         this.memoryReflection = memoryReflection;
+        this.transcriptStore = transcriptStore;
         if (this.toolPermissionManager != null) {
             this.toolPermissionManager.setConfirmer(this::confirmToolUse);
         }
@@ -269,6 +301,11 @@ public final class TerminalSession implements AutoCloseable {
 
         if ("/permissions".equals(input)) {
             handlePermissionsCommand();
+            return;
+        }
+
+        if ("/resume".equals(input) || input.startsWith("/resume ")) {
+            handleResumeCommand(slashArguments(input));
             return;
         }
 
@@ -418,6 +455,77 @@ public final class TerminalSession implements AutoCloseable {
         }
     }
 
+    private void handleResumeCommand(String sessionIdArgument) {
+        if (transcriptStore == null) {
+            terminal.writer().println("Transcript is not enabled.");
+            terminal.writer().flush();
+            return;
+        }
+
+        try {
+            String sessionId = sessionIdArgument == null || sessionIdArgument.isBlank()
+                    ? chooseResumeSessionId()
+                    : sessionIdArgument.trim();
+            if (sessionId == null) {
+                return;
+            }
+
+            List<Message> messages = transcriptStore.loadMessages(sessionId);
+            conversationSession.resume(sessionId, messages);
+            terminal.writer().println("Resumed session: " + sessionId);
+            terminal.writer().flush();
+        } catch (IOException | IllegalArgumentException e) {
+            terminal.writer().println("Failed to resume session: " + e.getMessage());
+            terminal.writer().flush();
+        }
+    }
+
+    private String chooseResumeSessionId() throws IOException {
+        List<TranscriptSessionOption> options = transcriptSessionOptions(transcriptStore.listSessions());
+        if (options.isEmpty()) {
+            terminal.writer().println("No transcript sessions to resume.");
+            terminal.writer().flush();
+            return null;
+        }
+
+        TranscriptSessionOption selected = chooseTranscriptSession(options);
+        return selected == null ? null : selected.sessionId();
+    }
+
+    private TranscriptSessionOption chooseTranscriptSession(List<TranscriptSessionOption> options) throws IOException {
+        int selected = 0;
+        Attributes originalAttributes = terminal.enterRawMode();
+        try {
+            hideCursor();
+            renderTranscriptSessionOptions(options, selected, false);
+            while (true) {
+                switch (readModelSelectionKey()) {
+                    case UP -> {
+                        selected = selected == 0 ? options.size() - 1 : selected - 1;
+                        renderTranscriptSessionOptions(options, selected, true);
+                    }
+                    case DOWN -> {
+                        selected = selected == options.size() - 1 ? 0 : selected + 1;
+                        renderTranscriptSessionOptions(options, selected, true);
+                    }
+                    case ACCEPT -> {
+                        return options.get(selected);
+                    }
+                    case CANCEL -> {
+                        return null;
+                    }
+                    case IGNORED -> {
+                        // Ignore unrelated keys while the selector is open.
+                    }
+                }
+            }
+        } finally {
+            clearModelOptions(options.size());
+            showCursor();
+            terminal.setAttributes(originalAttributes);
+        }
+    }
+
     private boolean confirmToolUse(String toolName, String input) {
         if (terminal == null || reader == null) {
             return false;
@@ -514,6 +622,18 @@ public final class TerminalSession implements AutoCloseable {
         terminal.writer().flush();
     }
 
+    private void renderTranscriptSessionOptions(List<TranscriptSessionOption> options, int selected, boolean redraw) {
+        if (redraw) {
+            terminal.writer().print("\u001B[" + options.size() + "A");
+        }
+        for (int i = 0; i < options.size(); i++) {
+            terminal.writer().print("\r\u001B[2K");
+            terminal.writer().print(formatTranscriptSessionOption(options.get(i), i == selected));
+            terminal.writer().print("\r\n");
+        }
+        terminal.writer().flush();
+    }
+
     private int selectedModelIndex(List<ModelOption> options) {
         String selected = settings.model();
         String resolved = settings.resolvedModel();
@@ -565,6 +685,13 @@ public final class TerminalSession implements AutoCloseable {
     }
 
     private String formatPermissionModeOption(PermissionModeOption option, boolean selected) {
+        if (selected) {
+            return BLUE + "> " + option.label() + RESET;
+        }
+        return "  " + option.label();
+    }
+
+    private String formatTranscriptSessionOption(TranscriptSessionOption option, boolean selected) {
         if (selected) {
             return BLUE + "> " + option.label() + RESET;
         }
@@ -633,6 +760,18 @@ public final class TerminalSession implements AutoCloseable {
         );
     }
 
+    static List<TranscriptSessionOption> transcriptSessionOptions(List<TranscriptSession> sessions) {
+        if (sessions == null || sessions.isEmpty()) {
+            return List.of();
+        }
+        return sessions.stream()
+                .map(session -> new TranscriptSessionOption(
+                        session.sessionId(),
+                        session.sessionId() + " (" + session.messageCount() + " messages)"
+                ))
+                .toList();
+    }
+
     @Override
     public void close() {
         if (terminal != null) {
@@ -668,6 +807,8 @@ public final class TerminalSession implements AutoCloseable {
     record ModelOption(String key, String label, String model) {}
 
     record PermissionModeOption(PermissionMode mode, String label) {}
+
+    record TranscriptSessionOption(String sessionId, String label) {}
 
     private enum ModelSelectionKey {
         UP,
