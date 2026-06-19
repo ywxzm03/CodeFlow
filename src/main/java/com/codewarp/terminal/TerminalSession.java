@@ -4,6 +4,8 @@ import com.codewarp.config.ConfigManager;
 import com.codewarp.config.Settings;
 import com.codewarp.core.QueryEngine;
 import com.codewarp.llm.LLMClient;
+import com.codewarp.memory.MemoryReflection;
+import com.codewarp.memory.MemoryUpdate;
 import com.codewarp.permissions.PermissionMode;
 import com.codewarp.permissions.ToolPermissionManager;
 import org.jline.reader.EndOfFileException;
@@ -35,6 +37,7 @@ public final class TerminalSession implements AutoCloseable {
     private final ConfigManager configManager;
     private final SlashCommandRegistry slashCommands;
     private final ToolPermissionManager toolPermissionManager;
+    private final MemoryReflection memoryReflection;
     private final AtomicBoolean exitRequested = new AtomicBoolean(false);
     private Settings settings;
 
@@ -56,11 +59,22 @@ public final class TerminalSession implements AutoCloseable {
             Settings settings,
             ToolPermissionManager toolPermissionManager
     ) {
-        this(queryEngine, llmClient, configManager, settings, SlashCommandRegistry.defaults(settings.resolvedModel()), toolPermissionManager);
+        this(queryEngine, llmClient, configManager, settings, toolPermissionManager, null);
+    }
+
+    public TerminalSession(
+            QueryEngine queryEngine,
+            LLMClient llmClient,
+            ConfigManager configManager,
+            Settings settings,
+            ToolPermissionManager toolPermissionManager,
+            MemoryReflection memoryReflection
+    ) {
+        this(queryEngine, llmClient, configManager, settings, SlashCommandRegistry.defaults(settings.resolvedModel()), toolPermissionManager, memoryReflection);
     }
 
     TerminalSession(QueryEngine queryEngine, SlashCommandRegistry slashCommands) {
-        this(queryEngine, null, null, Settings.defaults(), slashCommands, null);
+        this(queryEngine, null, null, Settings.defaults(), slashCommands, null, null);
     }
 
     TerminalSession(
@@ -71,14 +85,30 @@ public final class TerminalSession implements AutoCloseable {
             SlashCommandRegistry slashCommands,
             ToolPermissionManager toolPermissionManager
     ) {
+        this(queryEngine, llmClient, configManager, settings, slashCommands, toolPermissionManager, null);
+    }
+
+    TerminalSession(
+            QueryEngine queryEngine,
+            LLMClient llmClient,
+            ConfigManager configManager,
+            Settings settings,
+            SlashCommandRegistry slashCommands,
+            ToolPermissionManager toolPermissionManager,
+            MemoryReflection memoryReflection
+    ) {
         this.queryEngine = queryEngine;
         this.llmClient = llmClient;
         this.configManager = configManager;
         this.settings = settings;
         this.slashCommands = slashCommands;
         this.toolPermissionManager = toolPermissionManager;
+        this.memoryReflection = memoryReflection;
         if (this.toolPermissionManager != null) {
             this.toolPermissionManager.setConfirmer(this::confirmToolUse);
+        }
+        if (this.memoryReflection != null) {
+            this.memoryReflection.setConfirmer(this::confirmMemoryUpdate);
         }
     }
 
@@ -184,6 +214,9 @@ public final class TerminalSession implements AutoCloseable {
             QueryEngine.QueryResult result = queryEngine.query(input);
             terminal.writer().println(result.finalResponse());
             terminal.writer().flush();
+            if (memoryReflection != null && result.stopReason() == QueryEngine.QueryResult.StopReason.COMPLETED) {
+                memoryReflection.reflect(result.messages());
+            }
         } catch (Exception e) {
             terminal.writer().println();
             terminal.writer().println("Error: " + e.getMessage());
@@ -376,6 +409,48 @@ public final class TerminalSession implements AutoCloseable {
             return input;
         }
         return input.substring(0, maxLength) + "\n... truncated";
+    }
+
+    private boolean confirmMemoryUpdate(MemoryUpdate update) {
+        if (terminal == null || reader == null) {
+            return false;
+        }
+
+        terminal.writer().println();
+        terminal.writer().println("Memory update requires approval:");
+        terminal.writer().println("Layer: " + update.layer().directoryName());
+        terminal.writer().println("File: " + update.relativePath());
+        terminal.writer().println("Reason: " + update.reason());
+        terminal.writer().println();
+        terminal.writer().println("Content:");
+        terminal.writer().println(formatMemoryContentForConfirmation(update.content()));
+        if (update.indexEntry() != null && !update.indexEntry().isBlank()) {
+            terminal.writer().println();
+            terminal.writer().println("L1 index update:");
+            terminal.writer().println(update.indexEntry());
+        }
+        terminal.writer().flush();
+
+        try {
+            String answer = reader.readLine("Update memory? [y/N] ");
+            return "y".equalsIgnoreCase(answer.trim()) || "yes".equalsIgnoreCase(answer.trim());
+        } catch (UserInterruptException | EndOfFileException e) {
+            terminal.writer().println();
+            terminal.writer().flush();
+            return false;
+        }
+    }
+
+    private String formatMemoryContentForConfirmation(String content) {
+        if (content == null || content.isBlank()) {
+            return "";
+        }
+
+        int maxLength = 3000;
+        if (content.length() <= maxLength) {
+            return content;
+        }
+        return content.substring(0, maxLength) + "\n... truncated";
     }
 
     private int selectedPermissionModeIndex(List<PermissionModeOption> options) {

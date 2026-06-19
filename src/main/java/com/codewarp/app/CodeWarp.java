@@ -6,6 +6,7 @@ import com.codewarp.core.QueryEngine;
 import com.codewarp.llm.AnthropicClient;
 import com.codewarp.llm.LLMClient;
 import com.codewarp.memory.MemoryContextProvider;
+import com.codewarp.memory.MemoryReflection;
 import com.codewarp.memory.MemoryStore;
 import com.codewarp.permissions.ToolPermissionConfig;
 import com.codewarp.permissions.ToolPermissionManager;
@@ -76,10 +77,12 @@ public class CodeWarp {
         tools.add(new GlobTool());
 
         MemoryContextProvider memoryContextProvider = null;
+        MemoryReflection memoryReflection = null;
         MemoryStore memoryStore = new MemoryStore();
         try {
             memoryStore.initialize();
             memoryContextProvider = new MemoryContextProvider(memoryStore);
+            memoryReflection = new MemoryReflection(llmClient, memoryStore);
             tools.add(new MemoryReadTool(memoryStore));
         } catch (IOException e) {
             Console.warn("[Memory] 初始化失败，已禁用记忆系统: " + e.getMessage());
@@ -99,7 +102,7 @@ public class CodeWarp {
         );
 
         // 启动终端交互
-        new TerminalSession(queryEngine, llmClient, configManager, settings, toolPermissionManager).run();
+        new TerminalSession(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection).run();
     }
 
     private static void silenceLibraryLogging() {
