@@ -66,13 +66,6 @@ public class QueryEngine {
     }
 
     /**
-     * 主循环：处理用户输入并返回最终响应
-     */
-    public QueryResult query(String userInput) {
-        return query(userInput, new WorkingMemory());
-    }
-
-    /**
      * 主循环：处理用户输入并写入会话级工作记忆。
      */
     public QueryResult query(String userInput, WorkingMemory workingMemory) {
