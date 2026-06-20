@@ -27,8 +27,7 @@ class ConversationSessionTranscriptTest {
         TranscriptRecorder recorder = new TranscriptRecorder(store, "session-a");
         ConversationSession session = new ConversationSession(
                 new QueryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
-                new WorkingMemory(),
-                messages -> { },
+                null,
                 recorder
         );
 
@@ -46,8 +45,7 @@ class ConversationSessionTranscriptTest {
         TranscriptRecorder recorder = new TranscriptRecorder(store, "session-a");
         ConversationSession session = new ConversationSession(
                 new QueryEngine(new StaticStreamingClient(Flux.error(new RuntimeException("boom"))), List.of(), 3),
-                new WorkingMemory(),
-                messages -> { },
+                null,
                 recorder
         );
 
@@ -63,8 +61,7 @@ class ConversationSessionTranscriptTest {
         TranscriptRecorder recorder = new TranscriptRecorder(store, "new-session");
         ConversationSession session = new ConversationSession(
                 new QueryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
-                new WorkingMemory(),
-                messages -> { },
+                null,
                 recorder
         );
         session.workingMemory().append(new Message.User("current"));
@@ -98,8 +95,7 @@ class ConversationSessionTranscriptTest {
         TranscriptRecorder recorder = new TranscriptRecorder(store, "session-a");
         ConversationSession session = new ConversationSession(
                 new QueryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
-                new WorkingMemory(),
-                messages -> { },
+                null,
                 recorder
         );
 

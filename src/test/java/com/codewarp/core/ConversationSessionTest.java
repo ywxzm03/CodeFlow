@@ -1,6 +1,8 @@
 package com.codewarp.core;
 
 import com.codewarp.llm.LLMClient;
+import com.codewarp.memory.MemoryReflection;
+import com.codewarp.memory.TranscriptRecorder;
 import com.codewarp.tools.Tool;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
@@ -23,9 +25,9 @@ class ConversationSessionTest {
                 List.of(),
                 3
         );
-        WorkingMemory memory = new WorkingMemory();
-        memory.append(new Message.User("old"));
-        ConversationSession session = new ConversationSession(queryEngine, memory, reflected::set);
+        TestMemoryReflection memoryReflection = new TestMemoryReflection(reflected::set);
+        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled());
+        session.workingMemory().append(new Message.User("old"));
 
         QueryEngine.QueryResult result = session.handleUserInput("new");
 
@@ -44,7 +46,8 @@ class ConversationSessionTest {
                 List.of(),
                 3
         );
-        ConversationSession session = new ConversationSession(queryEngine, new WorkingMemory(), messages -> reflected.set(true));
+        TestMemoryReflection memoryReflection = new TestMemoryReflection(messages -> reflected.set(true));
+        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled());
 
         QueryEngine.QueryResult result = session.handleUserInput("new");
 
@@ -56,7 +59,8 @@ class ConversationSessionTest {
     void doesNotReflectMaxIterationResults() {
         AtomicBoolean reflected = new AtomicBoolean(false);
         QueryEngine queryEngine = new QueryEngine(new StaticStreamingClient(), List.of(), 0);
-        ConversationSession session = new ConversationSession(queryEngine, new WorkingMemory(), messages -> reflected.set(true));
+        TestMemoryReflection memoryReflection = new TestMemoryReflection(messages -> reflected.set(true));
+        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled());
 
         QueryEngine.QueryResult result = session.handleUserInput("new");
 
@@ -68,7 +72,8 @@ class ConversationSessionTest {
     void clearEmptiesWorkingMemory() {
         ConversationSession session = new ConversationSession(
                 new QueryEngine(new StaticStreamingClient(), List.of(), 0),
-                null
+                null,
+                TranscriptRecorder.disabled()
         );
         session.workingMemory().append(new Message.User("old"));
 
@@ -101,6 +106,20 @@ class ConversationSessionTest {
 
         @Override
         public void setModel(String model) {
+        }
+    }
+
+    private static final class TestMemoryReflection extends MemoryReflection {
+        private final java.util.function.Consumer<List<Message>> delegate;
+
+        private TestMemoryReflection(java.util.function.Consumer<List<Message>> delegate) {
+            super(null, null);
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void reflect(List<Message> messages) {
+            delegate.accept(messages);
         }
     }
 }
