@@ -24,17 +24,6 @@ public record Settings(
 ) {
     private static final String DEFAULT_MODEL_KEY = "A";
 
-    public Settings(
-            String apiKey,
-            String baseUrl,
-            String model,
-            Map<String, String> models,
-            Integer maxTokens,
-            Integer maxIterations
-    ) {
-        this(apiKey, baseUrl, model, models, maxTokens, maxIterations, null, null);
-    }
-
     /**
      * 默认配置
      */
@@ -76,10 +65,7 @@ public record Settings(
     }
 
     public String resolvedModel() {
-        if (models != null && models.containsKey(model)) {
-            return models.get(model);
-        }
-        return model;
+        return resolvedModels().get(model);
     }
 
     public Map<String, String> resolvedModels() {
@@ -109,6 +95,9 @@ public record Settings(
         }
         if (models != null && models.isEmpty()) {
             return ValidationResult.error("Models 未设置");
+        }
+        if (!resolvedModels().containsKey(model)) {
+            return ValidationResult.error("Model 必须是 models 中配置的 key");
         }
         if (maxTokens == null || maxTokens <= 0) {
             return ValidationResult.error("Max Tokens 必须大于0");

@@ -533,10 +533,9 @@ public final class TerminalSession implements AutoCloseable {
 
     private int selectedModelIndex(List<ModelOption> options) {
         String selected = settings.model();
-        String resolved = settings.resolvedModel();
         for (int i = 0; i < options.size(); i++) {
             ModelOption option = options.get(i);
-            if (option.key().equals(selected) || option.model().equals(selected) || option.model().equals(resolved)) {
+            if (option.key().equals(selected)) {
                 return i;
             }
         }
