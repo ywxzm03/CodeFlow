@@ -1,5 +1,8 @@
 package com.codewarp.memory;
 
+/**
+ * 可写入的长期记忆层。
+ */
 public enum MemoryLayer {
     L2("L2", ".txt"),
     L3("L3", ".md");

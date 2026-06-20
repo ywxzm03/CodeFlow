@@ -6,6 +6,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 
+/**
+ * L0-L3 记忆的文件存储。
+ */
 public class MemoryStore {
 
     private static final String CONFIG_DIR_NAME = ".codewrap";
@@ -77,6 +80,7 @@ public class MemoryStore {
             throw new IllegalArgumentException("记忆更新不能为空");
         }
 
+        // 追加写入，避免覆盖已有记忆。
         Path target = resolveWritableMemoryPath(update.layer(), update.fileName());
         String content = requireText(update.content(), "记忆内容不能为空");
         Files.createDirectories(target.getParent());

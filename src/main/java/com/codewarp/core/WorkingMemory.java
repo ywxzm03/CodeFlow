@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * L4 working memory for the current terminal conversation.
+ * L4 工作记忆，仅保存在内存中。
  */
 public final class WorkingMemory {
 

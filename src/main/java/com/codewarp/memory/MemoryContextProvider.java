@@ -5,6 +5,9 @@ import com.codewarp.util.Console;
 import java.io.IOException;
 import java.util.function.Supplier;
 
+/**
+ * 组装注入系统提示词的记忆上下文。
+ */
 public class MemoryContextProvider {
 
     private final MemoryStore memoryStore;

@@ -6,6 +6,9 @@ import com.codewarp.util.Console;
 import java.io.IOException;
 import java.util.List;
 
+/**
+ * 当前会话的 L5 记录器。
+ */
 public final class TranscriptRecorder {
 
     private final TranscriptStore transcriptStore;

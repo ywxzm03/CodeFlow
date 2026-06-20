@@ -10,6 +10,10 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 任务完成后的记忆反思。
+ * 生成写入建议，真正写入前仍需用户确认。
+ */
 public class MemoryReflection {
 
     private static final String SYSTEM_PROMPT = """

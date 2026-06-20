@@ -1,5 +1,8 @@
 package com.codewarp.memory;
 
+/**
+ * 待确认的 L2/L3 记忆写入。
+ */
 public record MemoryUpdate(
         MemoryLayer layer,
         String fileName,

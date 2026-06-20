@@ -62,7 +62,7 @@ public class CodeWarp {
             return;
         }
 
-        // 初始化组件（使用 Anthropic Messages API）
+        // 初始化模型客户端。
         LLMClient llmClient = new AnthropicClient(
                 settings.apiKey(),
                 settings.baseUrl(),
@@ -70,6 +70,7 @@ public class CodeWarp {
                 settings.maxTokens()
         );
 
+        // 注册基础工具。
         List<Tool> tools = new ArrayList<>();
         tools.add(new ReadTool());
         tools.add(new WriteTool());
@@ -78,6 +79,7 @@ public class CodeWarp {
         tools.add(new GrepTool());
         tools.add(new GlobTool());
 
+        // 初始化 L5 完整会话记录。
         TranscriptStore transcriptStore = null;
         TranscriptRecorder transcriptRecorder = TranscriptRecorder.disabled();
         TranscriptStore initializedTranscriptStore = new TranscriptStore();
@@ -89,6 +91,7 @@ public class CodeWarp {
             Console.warn("[Memory] L5 transcript 初始化失败，已禁用 transcript: " + e.getMessage());
         }
 
+        // 初始化 L0-L3 记忆，并把当前 transcript 路径注入上下文。
         MemoryContextProvider memoryContextProvider = null;
         MemoryReflection memoryReflection = null;
         MemoryStore memoryStore = new MemoryStore();
@@ -102,11 +105,14 @@ public class CodeWarp {
             Console.warn("[Memory] 初始化失败，已禁用记忆系统: " + e.getMessage());
         }
 
+        // 初始化工具权限管理。
         ToolPermissionConfig toolPermissionConfig = new ToolPermissionConfig(settings.resolvedToolPermissions());
         ToolPermissionManager toolPermissionManager = new ToolPermissionManager(
                 toolPermissionConfig,
                 settings.resolvedPermissionMode()
         );
+
+        // 组装查询引擎。
         QueryEngine queryEngine = new QueryEngine(
                 llmClient,
                 tools,
@@ -119,6 +125,9 @@ public class CodeWarp {
         new TerminalSession(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, transcriptRecorder, transcriptStore).run();
     }
 
+    /**
+     * 关闭三方库日志，避免干扰终端交互。
+     */
     private static void silenceLibraryLogging() {
         System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "off");
         Logger.getLogger("org.jline").setLevel(Level.OFF);

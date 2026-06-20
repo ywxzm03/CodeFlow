@@ -7,7 +7,8 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * Coordinates one terminal conversation session around L4 working memory.
+ * 终端会话协调器，维护 L4 工作记忆。
+ * 同时负责触发 L5 记录和 L2/L3 反思。
  */
 public final class ConversationSession {
 

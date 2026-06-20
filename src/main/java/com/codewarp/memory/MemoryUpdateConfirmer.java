@@ -1,5 +1,8 @@
 package com.codewarp.memory;
 
+/**
+ * 记忆写入确认器。
+ */
 @FunctionalInterface
 public interface MemoryUpdateConfirmer {
     boolean confirm(MemoryUpdate update);

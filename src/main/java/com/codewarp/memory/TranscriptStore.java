@@ -19,6 +19,9 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+/**
+ * L5 完整会话记录的文件存储。
+ */
 public final class TranscriptStore {
 
     private static final String CONFIG_DIR_NAME = ".codewrap";
@@ -53,6 +56,9 @@ public final class TranscriptStore {
         return timestamp + "-" + suffix;
     }
 
+    /**
+     * 追加写入本轮消息。
+     */
     public void append(String sessionId, List<Message> messages) throws IOException {
         validateSessionId(sessionId);
         if (messages == null || messages.isEmpty()) {
@@ -93,6 +99,9 @@ public final class TranscriptStore {
                 .toList();
     }
 
+    /**
+     * 读取 jsonl 中的有效记录。
+     */
     public List<TranscriptEntry> loadEntries(String sessionId) throws IOException {
         validateSessionId(sessionId);
         Path path = sessionPath(sessionId);
@@ -111,12 +120,15 @@ public final class TranscriptStore {
             try {
                 entries.add(parseEntry(objectMapper.readTree(line)));
             } catch (Exception ignored) {
-                // A damaged jsonl line should not make the whole transcript unusable.
+                // 跳过损坏行，避免整个会话不可恢复。
             }
         }
         return List.copyOf(entries);
     }
 
+    /**
+     * 列出可恢复会话。
+     */
     public List<TranscriptSession> listSessions() throws IOException {
         if (!Files.isDirectory(transcriptRoot)) {
             return List.of();
@@ -132,6 +144,9 @@ public final class TranscriptStore {
         }
     }
 
+    /**
+     * 校验 sessionId，避免路径穿越。
+     */
     public void validateSessionId(String sessionId) {
         if (sessionId == null || sessionId.isBlank()) {
             throw new IllegalArgumentException("sessionId 不能为空");
@@ -146,6 +161,9 @@ public final class TranscriptStore {
         return sessionPath(sessionId);
     }
 
+    /**
+     * 转为 jsonl 写入结构。
+     */
     private ObjectNode toJson(TranscriptEntry entry) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("uuid", entry.uuid());
@@ -193,6 +211,9 @@ public final class TranscriptStore {
         return node;
     }
 
+    /**
+     * 解析一行 jsonl 记录。
+     */
     private TranscriptEntry parseEntry(JsonNode node) {
         return new TranscriptEntry(
                 requiredText(node, "uuid"),
@@ -204,6 +225,9 @@ public final class TranscriptStore {
         );
     }
 
+    /**
+     * 还原消息模型。
+     */
     private Message parseMessage(JsonNode node) {
         if (node == null || !node.isObject()) {
             throw new IllegalArgumentException("transcript message 必须是对象");
@@ -240,6 +264,9 @@ public final class TranscriptStore {
         return List.copyOf(toolUses);
     }
 
+    /**
+     * 获取最后一条有效记录的 uuid。
+     */
     private String lastUuid(Path path) throws IOException {
         if (!Files.exists(path)) {
             return null;
@@ -253,7 +280,7 @@ public final class TranscriptStore {
             try {
                 lastUuid = requiredText(objectMapper.readTree(line), "uuid");
             } catch (Exception ignored) {
-                // Keep the last valid uuid.
+                // 保留最后一个有效 uuid。
             }
         }
         return lastUuid;
