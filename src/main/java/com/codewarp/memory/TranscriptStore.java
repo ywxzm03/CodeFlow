@@ -98,6 +98,37 @@ public final class TranscriptStore {
         }
     }
 
+    /**
+     * 追加写入 compact 边界元数据。
+     */
+    public String appendCompactBoundary(String sessionId, TranscriptRecord.CompactBoundary boundary) throws IOException {
+        validateSessionId(sessionId);
+        if (boundary == null) {
+            throw new IllegalArgumentException("boundary must not be null");
+        }
+
+        Files.createDirectories(transcriptRoot);
+        Path path = sessionPath(sessionId);
+        String uuid = UUID.randomUUID().toString();
+        TranscriptRecord record = new TranscriptRecord(
+                uuid,
+                lastUuid(path),
+                sessionId,
+                OffsetDateTime.now().toString(),
+                Paths.get("").toAbsolutePath().normalize().toString(),
+                "compact_boundary",
+                null,
+                boundary
+        );
+        Files.writeString(
+                path,
+                objectMapper.writeValueAsString(toJson(record)) + System.lineSeparator(),
+                StandardOpenOption.CREATE,
+                StandardOpenOption.APPEND
+        );
+        return uuid;
+    }
+
     public List<Message> loadMessages(String sessionId) throws IOException {
         return loadEntries(sessionId).stream()
                 .map(TranscriptEntry::message)
@@ -108,33 +139,68 @@ public final class TranscriptStore {
      * 从最后一条记录沿 parentUuid 恢复会话链。
      */
     public List<Message> loadMessagesForResume(String sessionId) throws IOException {
-        List<TranscriptEntry> entries = loadEntries(sessionId);
-        if (entries.isEmpty()) {
+        List<TranscriptRecord> records = loadRecords(sessionId);
+        if (records.isEmpty()) {
             return List.of();
         }
 
-        Map<String, TranscriptEntry> byUuid = new HashMap<>();
-        for (TranscriptEntry entry : entries) {
-            byUuid.put(entry.uuid(), entry);
+        Map<String, TranscriptRecord> byUuid = new HashMap<>();
+        for (TranscriptRecord record : records) {
+            byUuid.put(record.uuid(), record);
         }
 
-        List<Message> messages = new ArrayList<>();
+        List<TranscriptRecord> chain = new ArrayList<>();
         Set<String> visited = new HashSet<>();
-        TranscriptEntry current = entries.getLast();
+        TranscriptRecord current = records.getLast();
         while (current != null && visited.add(current.uuid())) {
-            messages.add(current.message());
+            chain.add(current);
             String parentUuid = current.parentUuid();
             current = parentUuid == null ? null : byUuid.get(parentUuid);
         }
 
-        Collections.reverse(messages);
+        Collections.reverse(chain);
+        int startIndex = indexAfterLastCompactBoundary(chain);
+        List<Message> messages = new ArrayList<>();
+        for (int i = startIndex; i < chain.size(); i++) {
+            TranscriptRecord record = chain.get(i);
+            if (record.isMessage()) {
+                messages.add(record.message());
+            }
+        }
         return List.copyOf(messages);
+    }
+
+    private int indexAfterLastCompactBoundary(List<TranscriptRecord> records) {
+        int startIndex = 0;
+        for (int i = 0; i < records.size(); i++) {
+            if (records.get(i).isCompactBoundary()) {
+                startIndex = i + 1;
+            }
+        }
+        return startIndex;
     }
 
     /**
      * 读取 jsonl 中的有效记录。
      */
     public List<TranscriptEntry> loadEntries(String sessionId) throws IOException {
+        return loadRecords(sessionId).stream()
+                .filter(TranscriptRecord::isMessage)
+                .map(record -> new TranscriptEntry(
+                        record.uuid(),
+                        record.parentUuid(),
+                        record.sessionId(),
+                        record.timestamp(),
+                        record.cwd(),
+                        record.message()
+                ))
+                .toList();
+    }
+
+    /**
+     * 读取 jsonl 中的有效通用记录。
+     */
+    public List<TranscriptRecord> loadRecords(String sessionId) throws IOException {
         validateSessionId(sessionId);
         Path path = sessionPath(sessionId);
         if (!Files.exists(path)) {
@@ -144,18 +210,18 @@ public final class TranscriptStore {
             throw new IllegalArgumentException("会话记录不是文件: " + sessionId);
         }
 
-        List<TranscriptEntry> entries = new ArrayList<>();
+        List<TranscriptRecord> records = new ArrayList<>();
         for (String line : Files.readAllLines(path)) {
             if (line == null || line.isBlank()) {
                 continue;
             }
             try {
-                entries.add(parseEntry(objectMapper.readTree(line)));
+                records.add(parseRecord(objectMapper.readTree(line)));
             } catch (Exception ignored) {
                 // 跳过损坏行，避免整个会话不可恢复。
             }
         }
-        return List.copyOf(entries);
+        return List.copyOf(records);
     }
 
     /**
@@ -209,6 +275,42 @@ public final class TranscriptStore {
         node.put("cwd", entry.cwd());
         node.put("type", messageType(entry.message()));
         node.set("message", anthropicMessageToJson(entry.message()));
+        return node;
+    }
+
+    private ObjectNode toJson(TranscriptRecord record) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("uuid", record.uuid());
+        if (record.parentUuid() == null) {
+            node.putNull("parentUuid");
+        } else {
+            node.put("parentUuid", record.parentUuid());
+        }
+        node.put("sessionId", record.sessionId());
+        node.put("timestamp", record.timestamp());
+        node.put("cwd", record.cwd());
+        node.put("type", record.type());
+        if (record.isMessage()) {
+            node.set("message", anthropicMessageToJson(record.message()));
+        } else if (record.isCompactBoundary()) {
+            node.set("compact", compactBoundaryToJson(record.compactBoundary()));
+        }
+        return node;
+    }
+
+    private ObjectNode compactBoundaryToJson(TranscriptRecord.CompactBoundary boundary) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("mode", boundary.mode());
+        node.put("reason", boundary.reason());
+        node.put("estimated_tokens_before", boundary.estimatedTokensBefore());
+        node.put("hot_message_count", boundary.hotMessageCount());
+        node.put("retry_count", boundary.retryCount());
+        if (boundary.summaryMessageUuid() == null) {
+            node.putNull("summary_message_uuid");
+        } else {
+            node.put("summary_message_uuid", boundary.summaryMessageUuid());
+        }
+        node.put("transcript_path", boundary.transcriptPath());
         return node;
     }
 
@@ -283,13 +385,57 @@ public final class TranscriptStore {
      * 解析一行 jsonl 记录。
      */
     private TranscriptEntry parseEntry(JsonNode node) {
+        TranscriptRecord record = parseRecord(node);
+        if (!record.isMessage()) {
+            throw new IllegalArgumentException("transcript entry 不是消息记录");
+        }
         return new TranscriptEntry(
+                record.uuid(),
+                record.parentUuid(),
+                record.sessionId(),
+                record.timestamp(),
+                record.cwd(),
+                record.message()
+        );
+    }
+
+    private TranscriptRecord parseRecord(JsonNode node) {
+        String type = requiredText(node, "type");
+        Message message = isMessageType(type) ? parseMessage(type, node.get("message")) : null;
+        TranscriptRecord.CompactBoundary compactBoundary = "compact_boundary".equals(type)
+                ? parseCompactBoundary(node.get("compact"))
+                : null;
+        if (message == null && compactBoundary == null) {
+            throw new IllegalArgumentException("未知 transcript record 类型: " + type);
+        }
+        return new TranscriptRecord(
                 requiredText(node, "uuid"),
                 optionalText(node, "parentUuid"),
                 requiredText(node, "sessionId"),
                 requiredText(node, "timestamp"),
                 requiredText(node, "cwd"),
-                parseMessage(requiredText(node, "type"), node.get("message"))
+                type,
+                message,
+                compactBoundary
+        );
+    }
+
+    private boolean isMessageType(String type) {
+        return "user".equals(type) || "assistant".equals(type);
+    }
+
+    private TranscriptRecord.CompactBoundary parseCompactBoundary(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            throw new IllegalArgumentException("compact boundary 必须是对象");
+        }
+        return new TranscriptRecord.CompactBoundary(
+                requiredText(node, "mode"),
+                requiredText(node, "reason"),
+                optionalLong(node, "estimated_tokens_before"),
+                (int) optionalLong(node, "hot_message_count"),
+                (int) optionalLong(node, "retry_count"),
+                optionalText(node, "summary_message_uuid"),
+                requiredText(node, "transcript_path")
         );
     }
 

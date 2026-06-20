@@ -81,6 +81,54 @@ class TranscriptStoreTest {
     }
 
     @Test
+    void loadMessagesForResumeStartsAfterLastCompactBoundary() throws Exception {
+        TranscriptStore store = initializedStore();
+        store.append("session-a", List.of(
+                new Message.User("old"),
+                new Message.Assistant("old answer", List.of(), null)
+        ));
+        store.appendCompactBoundary("session-a", new TranscriptRecord.CompactBoundary(
+                "auto",
+                "token_threshold",
+                160000,
+                5,
+                0,
+                "summary-uuid",
+                tempDir.resolve("memory/L5/session-a.jsonl").toString()
+        ));
+        store.append("session-a", List.of(
+                new Message.User("summary"),
+                new Message.User("hot")
+        ));
+
+        assertEquals(
+                List.of(new Message.User("summary"), new Message.User("hot")),
+                store.loadMessagesForResume("session-a")
+        );
+    }
+
+    @Test
+    void compactBoundaryDoesNotEnterMessageEntries() throws Exception {
+        TranscriptStore store = initializedStore();
+        store.append("session-a", List.of(new Message.User("old")));
+        store.appendCompactBoundary("session-a", new TranscriptRecord.CompactBoundary(
+                "reactive",
+                "context_overflow_error",
+                180000,
+                2,
+                1,
+                "summary-uuid",
+                tempDir.resolve("memory/L5/session-a.jsonl").toString()
+        ));
+
+        assertEquals(List.of(new Message.User("old")), store.loadMessages("session-a"));
+        List<TranscriptRecord> records = store.loadRecords("session-a");
+        assertEquals(2, records.size());
+        assertTrue(records.get(1).isCompactBoundary());
+        assertEquals("reactive", records.get(1).compactBoundary().mode());
+    }
+
+    @Test
     void listsSessions() throws Exception {
         TranscriptStore store = initializedStore();
         store.append("session-a", List.of(new Message.User("hello")));
