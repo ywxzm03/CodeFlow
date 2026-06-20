@@ -42,6 +42,7 @@ public final class AutoCompactor {
             return Result.notCompacted();
         }
 
+        // snip 已释放的部分不再计入 auto 触发阈值。
         long estimatedTokens = Math.max(0, tokenEstimator.estimate(systemPrompt, workingMemory.snapshot(), tools) - tokensFreed);
         if (estimatedTokens < policy.autoCompactThresholdTokens()) {
             return Result.notCompacted();
@@ -54,8 +55,10 @@ public final class AutoCompactor {
         if (before.isEmpty()) {
             return Result.notCompacted();
         }
+        // 保证压缩前的完整 L4 已写入 L5。
         transcriptRecorder.recordUnpersisted(workingMemory);
 
+        // auto 保留热消息和关键消息，其余冷数据写成摘要。
         List<Message> preserved = CompactionSupport.preservedMessages(before, policy.autoCompactHotMessages(), true);
         List<Message> cold = before.stream()
                 .filter(message -> !preserved.contains(message))
@@ -70,6 +73,7 @@ public final class AutoCompactor {
         workingMemory.rollbackTo(0);
         after.forEach(workingMemory::append);
         try {
+            // boundary 之后的消息就是 resume 需要恢复的新 L4。
             String boundaryUuid = transcriptStore.appendCompactBoundary(
                     transcriptRecorder.sessionId(),
                     new TranscriptRecord.CompactBoundary(

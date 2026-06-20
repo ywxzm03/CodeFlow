@@ -24,6 +24,9 @@ final class CompactionSupport {
     private CompactionSupport() {
     }
 
+    /**
+     * 按需保留关键消息，再保留最近热消息。
+     */
     static List<Message> preservedMessages(List<Message> messages, int hotMessageCount, boolean keepKeywordMessages) {
         Set<Message> preserved = new LinkedHashSet<>();
         if (keepKeywordMessages) {
@@ -40,6 +43,9 @@ final class CompactionSupport {
         return messages.stream().filter(preserved::contains).toList();
     }
 
+    /**
+     * 用模型把冷数据压成摘要。
+     */
     static String summarize(LLMClient llmClient, List<Message> cold) {
         if (cold == null || cold.isEmpty()) {
             return "No older cold messages needed summarization.";

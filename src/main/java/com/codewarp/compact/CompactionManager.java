@@ -20,6 +20,9 @@ public final class CompactionManager {
         this.reactiveCompactor = reactiveCompactor;
     }
 
+    /**
+     * 模型调用前：先 snip，再按阈值 auto。
+     */
     public BeforeCallResult beforeModelCall(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools) {
         long tokensFreed = 0;
         if (snipCompactor != null) {
@@ -31,6 +34,9 @@ public final class CompactionManager {
         return new BeforeCallResult(tokensFreed, autoResult.compacted());
     }
 
+    /**
+     * 上下文超限后触发兜底压缩。
+     */
     public ReactiveResult reactiveCompact(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools, RuntimeException error, int retryCount) {
         if (!isContextOverflow(error) || reactiveCompactor == null) {
             return ReactiveResult.notCompacted();

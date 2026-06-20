@@ -17,6 +17,7 @@ public final class TokenEstimator {
             return 0;
         }
 
+        // 优先用最近一次真实 usage，再粗算后续新增消息。
         for (int i = messages.size() - 1; i >= 0; i--) {
             Message message = messages.get(i);
             if (message instanceof Message.Assistant assistant && assistant.usage() != null) {
@@ -27,6 +28,9 @@ public final class TokenEstimator {
         return estimateRough(messages);
     }
 
+    /**
+     * 估算完整请求：system + messages + tools。
+     */
     public long estimate(String systemPrompt, List<Message> messages, List<Tool> tools) {
         long total = roughText(systemPrompt);
         total += estimate(messages);

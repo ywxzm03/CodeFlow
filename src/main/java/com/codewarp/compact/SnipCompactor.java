@@ -42,6 +42,7 @@ public final class SnipCompactor {
         if (!hasLongToolResult(workingMemory.snapshot())) {
             return Result.empty();
         }
+        // 先落盘原始工具结果，L4 才能只保留摘要。
         transcriptRecorder.recordUnpersisted(workingMemory);
 
         long tokensFreed = 0;
@@ -62,6 +63,7 @@ public final class SnipCompactor {
 
             String summary = summarize(toolResult, targetUuid);
             long freed = Math.max(0, tokenEstimator.roughText(toolResult.content()) - tokenEstimator.roughText(summary));
+            // snip 只记录元数据，完整内容仍在原始 transcript 消息里。
             TranscriptRecord.SnipCompact snip = new TranscriptRecord.SnipCompact(
                     targetUuid,
                     toolResult.toolUseId(),

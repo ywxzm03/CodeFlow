@@ -46,9 +46,11 @@ public final class ReactiveCompactor {
         if (before.isEmpty()) {
             return Result.notCompacted();
         }
+        // 兜底压缩前也要先保留完整原文。
         transcriptRecorder.recordUnpersisted(workingMemory);
 
         long estimatedTokens = tokenEstimator.estimate(systemPrompt, before, tools);
+        // reactive 只保留最近热消息，压缩力度最大。
         List<Message> preserved = CompactionSupport.preservedMessages(before, policy.reactiveCompactHotMessages(), false);
         List<Message> cold = before.stream()
                 .filter(message -> !preserved.contains(message))
@@ -63,6 +65,7 @@ public final class ReactiveCompactor {
         workingMemory.rollbackTo(0);
         after.forEach(workingMemory::append);
         try {
+            // reactive boundary 用来标记重试前的强压缩点。
             String boundaryUuid = transcriptStore.appendCompactBoundary(
                     transcriptRecorder.sessionId(),
                     new TranscriptRecord.CompactBoundary(
