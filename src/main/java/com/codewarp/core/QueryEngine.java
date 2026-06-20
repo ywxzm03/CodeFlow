@@ -1,5 +1,6 @@
 package com.codewarp.core;
 
+import com.codewarp.compact.CompactionManager;
 import com.codewarp.llm.LLMClient;
 import com.codewarp.memory.MemoryContextProvider;
 import com.codewarp.permissions.ToolPermissionManager;
@@ -39,19 +40,22 @@ public class QueryEngine {
     private final int maxIterations;
     private final ToolPermissionManager toolPermissionManager;
     private final MemoryContextProvider memoryContextProvider;
+    private final CompactionManager compactionManager;
 
     public QueryEngine(
             LLMClient llmClient,
             List<Tool> tools,
             int maxIterations,
             ToolPermissionManager toolPermissionManager,
-            MemoryContextProvider memoryContextProvider
+            MemoryContextProvider memoryContextProvider,
+            CompactionManager compactionManager
     ) {
         this.llmClient = Objects.requireNonNull(llmClient, "llmClient must not be null");
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
         this.maxIterations = maxIterations;
         this.toolPermissionManager = Objects.requireNonNull(toolPermissionManager, "toolPermissionManager must not be null");
         this.memoryContextProvider = memoryContextProvider;
+        this.compactionManager = compactionManager;
     }
 
     /**
@@ -63,7 +67,9 @@ public class QueryEngine {
         }
 
         int startIndex = workingMemory.size();
-        workingMemory.append(new Message.User(userInput));
+        Message.User userMessage = new Message.User(userInput);
+        workingMemory.append(userMessage);
+        TurnState turnState = new TurnState(startIndex, userMessage);
 
         int iteration = 0;
 
@@ -73,7 +79,7 @@ public class QueryEngine {
             Console.info("\n[Iteration " + iteration + "] 调用LLM...");
 
             // 流式执行模式
-            QueryResult result = executeStreamingIteration(workingMemory, startIndex, iteration);
+            QueryResult result = executeStreamingIteration(workingMemory, turnState, iteration);
             if (result != null) {
                 return result;
             }
@@ -81,7 +87,7 @@ public class QueryEngine {
 
         // 达到最大迭代次数
         Console.warn("\n[警告] 达到最大迭代次数: " + maxIterations);
-        List<Message> turnMessages = workingMemory.sliceFrom(startIndex);
+        List<Message> turnMessages = sliceCurrentTurn(workingMemory, turnState);
         return new QueryResult(
             "达到最大迭代次数限制",
             workingMemory.snapshot(),
@@ -91,15 +97,22 @@ public class QueryEngine {
         );
     }
 
+    private String systemPrompt() {
+        return memoryContextProvider == null
+                ? SYSTEM_PROMPT
+                : memoryContextProvider.buildSystemPrompt(SYSTEM_PROMPT);
+    }
+
     /**
      * 流式执行模式的迭代
      */
-    private QueryResult executeStreamingIteration(WorkingMemory workingMemory, int startIndex, int iteration) {
+    private QueryResult executeStreamingIteration(WorkingMemory workingMemory, TurnState turnState, int iteration) {
         // 创建流式工具执行器
         StreamingToolExecutor executor = new StreamingToolExecutor(tools, toolPermissionManager);
-        String systemPrompt = memoryContextProvider == null
-                ? SYSTEM_PROMPT
-                : memoryContextProvider.buildSystemPrompt(SYSTEM_PROMPT);
+        String systemPrompt = systemPrompt();
+        if (compactionManager != null) {
+            compactionManager.beforeModelCall(systemPrompt, workingMemory, tools);
+        }
 
         try {
             StringBuilder contentBuilder = new StringBuilder();
@@ -125,7 +138,7 @@ public class QueryEngine {
             } catch (RuntimeException streamError) {
                 // 流式中断：取消已启动的工具，丢弃本轮所有副作用，不写入半截消息
                 executor.discard();
-                workingMemory.rollbackTo(startIndex);
+                rollbackCurrentTurn(workingMemory, turnState);
                 Console.warn("\n[错误] 流式中断，已丢弃本轮工具执行: " + streamError.getMessage());
                 return new QueryResult(
                     "流式调用失败: " + streamError.getMessage(),
@@ -150,7 +163,7 @@ public class QueryEngine {
                 return new QueryResult(
                         content,
                         workingMemory.snapshot(),
-                        workingMemory.sliceFrom(startIndex),
+                        sliceCurrentTurn(workingMemory, turnState),
                         iteration,
                         QueryResult.StopReason.COMPLETED
                 );
@@ -177,6 +190,26 @@ public class QueryEngine {
         }
     }
 
+    private List<Message> sliceCurrentTurn(WorkingMemory workingMemory, TurnState turnState) {
+        List<Message> snapshot = workingMemory.snapshot();
+        int startIndex = currentTurnStart(snapshot, turnState);
+        return List.copyOf(snapshot.subList(startIndex, snapshot.size()));
+    }
+
+    private void rollbackCurrentTurn(WorkingMemory workingMemory, TurnState turnState) {
+        int startIndex = currentTurnStart(workingMemory.snapshot(), turnState);
+        workingMemory.rollbackTo(startIndex);
+    }
+
+    private int currentTurnStart(List<Message> messages, TurnState turnState) {
+        for (int i = 0; i < messages.size(); i++) {
+            if (messages.get(i) == turnState.userMessage()) {
+                return i;
+            }
+        }
+        return Math.min(turnState.originalStartIndex(), messages.size());
+    }
+
     /**
      * 查询结果
      */
@@ -192,5 +225,8 @@ public class QueryEngine {
             MAX_ITERATIONS,
             ERROR
         }
+    }
+
+    private record TurnState(int originalStartIndex, Message.User userMessage) {
     }
 }

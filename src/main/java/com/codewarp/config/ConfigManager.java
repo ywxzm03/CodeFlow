@@ -102,6 +102,14 @@ public class ConfigManager {
                     "Grep": "ask",
                     "Glob": "ask",
                     "MemoryRead": "ask"
+                  },
+                  "compaction": {
+                    "enabled": true,
+                    "context_window_tokens": 200000,
+                    "snip_tool_result_threshold_chars": 8000,
+                    "auto_compact_threshold_ratio": 0.8,
+                    "auto_compact_hot_messages": 5,
+                    "reactive_compact_hot_messages": 2
                   }
                 }
                 """;

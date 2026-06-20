@@ -20,7 +20,8 @@ public record Settings(
         @JsonProperty("max_tokens") Integer maxTokens,
         @JsonProperty("max_iterations") Integer maxIterations,
         @JsonProperty("permission_mode") PermissionMode permissionMode,
-        @JsonProperty("tool_permissions") Map<String, ToolPermission> toolPermissions
+        @JsonProperty("tool_permissions") Map<String, ToolPermission> toolPermissions,
+        @JsonProperty("compaction") Compaction compaction
 ) {
     private static final String DEFAULT_MODEL_KEY = "A";
 
@@ -36,7 +37,8 @@ public record Settings(
                 8192,
                 25,
                 PermissionMode.ASK,
-                defaultToolPermissions()
+                defaultToolPermissions(),
+                Compaction.defaults()
         );
     }
 
@@ -52,16 +54,17 @@ public record Settings(
                 other.maxTokens != null ? other.maxTokens : this.maxTokens,
                 other.maxIterations != null ? other.maxIterations : this.maxIterations,
                 other.permissionMode != null ? other.permissionMode : this.permissionMode,
-                other.toolPermissions != null ? other.toolPermissions : this.toolPermissions
+                other.toolPermissions != null ? other.toolPermissions : this.toolPermissions,
+                other.compaction != null ? other.compaction : this.compaction
         );
     }
 
     public Settings withModel(String model) {
-        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions);
+        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions, compaction);
     }
 
     public Settings withPermissionMode(PermissionMode permissionMode) {
-        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions);
+        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions, compaction);
     }
 
     public String resolvedModel() {
@@ -78,6 +81,10 @@ public record Settings(
 
     public PermissionMode resolvedPermissionMode() {
         return permissionMode == null ? PermissionMode.ASK : permissionMode;
+    }
+
+    public Compaction resolvedCompaction() {
+        return compaction == null ? Compaction.defaults() : compaction.mergeDefaults();
     }
 
     /**
@@ -104,6 +111,19 @@ public record Settings(
         }
         if (maxIterations == null || maxIterations <= 0) {
             return ValidationResult.error("Max Iterations 必须大于0");
+        }
+        Compaction resolvedCompaction = resolvedCompaction();
+        if (resolvedCompaction.contextWindowTokens() <= 0) {
+            return ValidationResult.error("Compaction context_window_tokens 必须大于0");
+        }
+        if (resolvedCompaction.snipToolResultThresholdChars() <= 0) {
+            return ValidationResult.error("Compaction snip_tool_result_threshold_chars 必须大于0");
+        }
+        if (resolvedCompaction.autoCompactThresholdRatio() <= 0 || resolvedCompaction.autoCompactThresholdRatio() >= 1) {
+            return ValidationResult.error("Compaction auto_compact_threshold_ratio 必须在0到1之间");
+        }
+        if (resolvedCompaction.autoCompactHotMessages() < 0 || resolvedCompaction.reactiveCompactHotMessages() < 0) {
+            return ValidationResult.error("Compaction hot message 数不能小于0");
         }
         return ValidationResult.ok();
     }
@@ -136,5 +156,31 @@ public record Settings(
         permissions.put("Glob", ToolPermission.ASK);
         permissions.put("MemoryRead", ToolPermission.ASK);
         return permissions;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Compaction(
+            @JsonProperty("enabled") Boolean enabled,
+            @JsonProperty("context_window_tokens") Long contextWindowTokens,
+            @JsonProperty("snip_tool_result_threshold_chars") Integer snipToolResultThresholdChars,
+            @JsonProperty("auto_compact_threshold_ratio") Double autoCompactThresholdRatio,
+            @JsonProperty("auto_compact_hot_messages") Integer autoCompactHotMessages,
+            @JsonProperty("reactive_compact_hot_messages") Integer reactiveCompactHotMessages
+    ) {
+        public static Compaction defaults() {
+            return new Compaction(true, 200_000L, 8_000, 0.8, 5, 2);
+        }
+
+        public Compaction mergeDefaults() {
+            Compaction defaults = defaults();
+            return new Compaction(
+                    enabled != null ? enabled : defaults.enabled,
+                    contextWindowTokens != null ? contextWindowTokens : defaults.contextWindowTokens,
+                    snipToolResultThresholdChars != null ? snipToolResultThresholdChars : defaults.snipToolResultThresholdChars,
+                    autoCompactThresholdRatio != null ? autoCompactThresholdRatio : defaults.autoCompactThresholdRatio,
+                    autoCompactHotMessages != null ? autoCompactHotMessages : defaults.autoCompactHotMessages,
+                    reactiveCompactHotMessages != null ? reactiveCompactHotMessages : defaults.reactiveCompactHotMessages
+            );
+        }
     }
 }

@@ -32,7 +32,8 @@ class QueryEngineMemoryContextTest {
                 List.of(),
                 1,
                 ToolPermissionManager.askByDefault(),
-                new MemoryContextProvider(store)
+                new MemoryContextProvider(store),
+                null
         );
 
         QueryEngine.QueryResult result = queryEngine.query("hello", new WorkingMemory());

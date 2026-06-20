@@ -1,6 +1,7 @@
 package com.codewarp.memory;
 
 import com.codewarp.core.Message;
+import com.codewarp.core.WorkingMemory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -76,7 +77,7 @@ class TranscriptStoreTest {
 
         assertEquals(
                 List.of(new Message.User("root"), new Message.User("branch")),
-                store.loadMessagesForResume("session-a")
+                resumeMessages(store, "session-a")
         );
     }
 
@@ -103,7 +104,7 @@ class TranscriptStoreTest {
 
         assertEquals(
                 List.of(new Message.User("summary"), new Message.User("hot")),
-                store.loadMessagesForResume("session-a")
+                resumeMessages(store, "session-a")
         );
     }
 
@@ -147,7 +148,7 @@ class TranscriptStoreTest {
 
         assertEquals(
                 List.of(new Message.ToolResult("toolu_1", "summary", false)),
-                store.loadMessagesForResume("session-a")
+                resumeMessages(store, "session-a")
         );
         assertEquals(
                 List.of(new Message.ToolResult("toolu_1", "full content", false)),
@@ -203,5 +204,11 @@ class TranscriptStoreTest {
         TranscriptStore store = new TranscriptStore(tempDir.resolve("memory/L5"));
         store.initialize();
         return store;
+    }
+
+    private List<Message> resumeMessages(TranscriptStore store, String sessionId) throws Exception {
+        return store.loadWorkingMemoryEntriesForResume(sessionId).stream()
+                .map(WorkingMemory.Entry::message)
+                .toList();
     }
 }

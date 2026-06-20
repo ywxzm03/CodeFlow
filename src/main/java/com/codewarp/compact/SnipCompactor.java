@@ -39,6 +39,11 @@ public final class SnipCompactor {
             return Result.empty();
         }
 
+        if (!hasLongToolResult(workingMemory.snapshot())) {
+            return Result.empty();
+        }
+        transcriptRecorder.recordUnpersisted(workingMemory);
+
         long tokensFreed = 0;
         int compacted = 0;
         List<Message> messages = workingMemory.snapshot();
@@ -78,6 +83,17 @@ public final class SnipCompactor {
             }
         }
         return new Result(compacted, tokensFreed);
+    }
+
+    private boolean hasLongToolResult(List<Message> messages) {
+        for (Message message : messages) {
+            if (message instanceof Message.ToolResult toolResult
+                    && toolResultLength(toolResult) > thresholdChars
+                    && !isSnipSummary(toolResult.content())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private int toolResultLength(Message.ToolResult toolResult) {

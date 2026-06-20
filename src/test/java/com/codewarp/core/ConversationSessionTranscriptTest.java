@@ -29,8 +29,7 @@ class ConversationSessionTranscriptTest {
         ConversationSession session = new ConversationSession(
                 queryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
                 null,
-                recorder,
-                null
+                recorder
         );
 
         session.handleUserInput("hello");
@@ -48,8 +47,7 @@ class ConversationSessionTranscriptTest {
         ConversationSession session = new ConversationSession(
                 queryEngine(new StaticStreamingClient(Flux.error(new RuntimeException("boom"))), List.of(), 3),
                 null,
-                recorder,
-                null
+                recorder
         );
 
         session.handleUserInput("hello");
@@ -65,12 +63,11 @@ class ConversationSessionTranscriptTest {
         ConversationSession session = new ConversationSession(
                 queryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
                 null,
-                recorder,
-                null
+                recorder
         );
         session.workingMemory().append(new Message.User("current"));
 
-        session.resume("old-session", store.loadMessages("old-session"));
+        session.resume("old-session", store.loadWorkingMemoryEntriesForResume("old-session"));
         session.handleUserInput("new");
 
         assertEquals(
@@ -100,8 +97,7 @@ class ConversationSessionTranscriptTest {
         ConversationSession session = new ConversationSession(
                 queryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
                 null,
-                recorder,
-                null
+                recorder
         );
 
         QueryEngine.QueryResult result = session.handleUserInput("hello");
@@ -116,7 +112,7 @@ class ConversationSessionTranscriptTest {
     }
 
     private QueryEngine queryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations) {
-        return new QueryEngine(llmClient, tools, maxIterations, ToolPermissionManager.askByDefault(), null);
+        return new QueryEngine(llmClient, tools, maxIterations, ToolPermissionManager.askByDefault(), null, null);
     }
 
     private static final class StaticStreamingClient implements LLMClient {

@@ -67,6 +67,16 @@ class WorkingMemoryTest {
     }
 
     @Test
+    void restoreKeepsMessagesAndTranscriptUuids() {
+        WorkingMemory memory = new WorkingMemory();
+
+        memory.restore(List.of(new WorkingMemory.Entry(new Message.User("hello"), "uuid-1")));
+
+        assertEquals(List.of(new Message.User("hello")), memory.snapshot());
+        assertEquals("uuid-1", memory.transcriptUuidAt(0));
+    }
+
+    @Test
     void invalidIndexesAreRejected() {
         WorkingMemory memory = new WorkingMemory();
 

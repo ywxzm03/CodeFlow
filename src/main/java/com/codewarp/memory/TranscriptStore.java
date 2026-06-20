@@ -1,6 +1,7 @@
 package com.codewarp.memory;
 
 import com.codewarp.core.Message;
+import com.codewarp.core.WorkingMemory;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -174,7 +175,7 @@ public final class TranscriptStore {
     /**
      * 从最后一条记录沿 parentUuid 恢复会话链。
      */
-    public List<Message> loadMessagesForResume(String sessionId) throws IOException {
+    public List<WorkingMemory.Entry> loadWorkingMemoryEntriesForResume(String sessionId) throws IOException {
         List<TranscriptRecord> records = loadRecords(sessionId);
         if (records.isEmpty()) {
             return List.of();
@@ -196,15 +197,15 @@ public final class TranscriptStore {
 
         Collections.reverse(chain);
         int startIndex = indexAfterLastCompactBoundary(chain);
-        List<Message> messages = new ArrayList<>();
+        List<WorkingMemory.Entry> entries = new ArrayList<>();
         Map<String, TranscriptRecord.SnipCompact> snipsByTarget = snipsByTarget(chain, startIndex);
         for (int i = startIndex; i < chain.size(); i++) {
             TranscriptRecord record = chain.get(i);
             if (record.isMessage()) {
-                messages.add(applySnip(record, snipsByTarget.get(record.uuid())));
+                entries.add(new WorkingMemory.Entry(applySnip(record, snipsByTarget.get(record.uuid())), record.uuid()));
             }
         }
-        return List.copyOf(messages);
+        return List.copyOf(entries);
     }
 
     private Map<String, TranscriptRecord.SnipCompact> snipsByTarget(List<TranscriptRecord> records, int startIndex) {

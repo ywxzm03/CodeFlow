@@ -44,7 +44,7 @@ class SnipCompactorTest {
     }
 
     @Test
-    void skipsToolResultWithoutTranscriptUuid() throws Exception {
+    void persistsAndCompactsToolResultWithoutTranscriptUuid() throws Exception {
         TranscriptStore store = new TranscriptStore(tempDir.resolve("memory/L5"));
         store.initialize();
         TranscriptRecorder recorder = new TranscriptRecorder(store, "session-a");
@@ -53,7 +53,12 @@ class SnipCompactorTest {
 
         SnipCompactor.Result result = new SnipCompactor(40, new TokenEstimator(), recorder, store).compact(memory);
 
-        assertEquals(0, result.compactedCount());
-        assertEquals("x".repeat(120), ((Message.ToolResult) memory.snapshot().getFirst()).content());
+        assertEquals(1, result.compactedCount());
+        assertTrue(((Message.ToolResult) memory.snapshot().getFirst()).content().startsWith("[CodeWarp snip compact]"));
+        List<TranscriptRecord> records = store.loadRecords("session-a");
+        assertEquals(2, records.size());
+        assertTrue(records.get(0).isMessage());
+        assertTrue(records.get(1).isSnipCompact());
+        assertEquals(records.get(0).uuid(), records.get(1).snipCompact().targetUuid());
     }
 }

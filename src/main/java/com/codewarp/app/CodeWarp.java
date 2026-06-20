@@ -2,6 +2,9 @@ package com.codewarp.app;
 
 import com.codewarp.config.ConfigManager;
 import com.codewarp.config.Settings;
+import com.codewarp.compact.AutoCompactor;
+import com.codewarp.compact.CompactionManager;
+import com.codewarp.compact.CompactionPolicy;
 import com.codewarp.compact.SnipCompactor;
 import com.codewarp.compact.TokenEstimator;
 import com.codewarp.core.QueryEngine;
@@ -114,20 +117,36 @@ public class CodeWarp {
                 settings.resolvedPermissionMode()
         );
 
+        // 组装三层压缩器。
+        CompactionManager compactionManager = null;
+        if (transcriptStore != null) {
+            Settings.Compaction compaction = settings.resolvedCompaction();
+            CompactionPolicy policy = new CompactionPolicy(
+                    compaction.enabled(),
+                    compaction.contextWindowTokens(),
+                    compaction.snipToolResultThresholdChars(),
+                    compaction.autoCompactThresholdRatio(),
+                    compaction.autoCompactHotMessages(),
+                    compaction.reactiveCompactHotMessages()
+            );
+            TokenEstimator tokenEstimator = new TokenEstimator();
+            SnipCompactor snipCompactor = new SnipCompactor(policy.snipToolResultThresholdChars(), tokenEstimator, transcriptRecorder, transcriptStore);
+            AutoCompactor autoCompactor = new AutoCompactor(policy, tokenEstimator, llmClient, transcriptRecorder, transcriptStore);
+            compactionManager = new CompactionManager(snipCompactor, autoCompactor);
+        }
+
         // 组装查询引擎。
         QueryEngine queryEngine = new QueryEngine(
                 llmClient,
                 tools,
                 settings.maxIterations(),
                 toolPermissionManager,
-                memoryContextProvider
+                memoryContextProvider,
+                compactionManager
         );
-        SnipCompactor snipCompactor = transcriptStore == null
-                ? null
-                : new SnipCompactor(8000, new TokenEstimator(), transcriptRecorder, transcriptStore);
 
         // 启动终端交互
-        new TerminalSession(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, transcriptRecorder, snipCompactor, transcriptStore).run();
+        new TerminalSession(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, transcriptRecorder, transcriptStore).run();
     }
 
     /**

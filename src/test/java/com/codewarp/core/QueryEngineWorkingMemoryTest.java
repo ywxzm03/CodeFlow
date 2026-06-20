@@ -126,7 +126,7 @@ class QueryEngineWorkingMemoryTest {
     }
 
     private QueryEngine queryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations) {
-        return new QueryEngine(llmClient, tools, maxIterations, ToolPermissionManager.askByDefault(), null);
+        return new QueryEngine(llmClient, tools, maxIterations, ToolPermissionManager.askByDefault(), null, null);
     }
 
     private QueryEngine queryEngine(
@@ -140,6 +140,7 @@ class QueryEngineWorkingMemoryTest {
                 tools,
                 maxIterations,
                 new ToolPermissionManager(toolPermissionConfig, PermissionMode.ASK),
+                null,
                 null
         );
     }

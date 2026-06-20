@@ -23,6 +23,14 @@ public final class WorkingMemory {
         transcriptUuids.add(null);
     }
 
+    public synchronized List<Entry> snapshotEntries() {
+        List<Entry> entries = new ArrayList<>();
+        for (int i = 0; i < messages.size(); i++) {
+            entries.add(new Entry(messages.get(i), transcriptUuids.get(i)));
+        }
+        return List.copyOf(entries);
+    }
+
     public synchronized List<Message> snapshot() {
         return List.copyOf(messages);
     }
@@ -61,6 +69,21 @@ public final class WorkingMemory {
         }
     }
 
+    public synchronized void restore(List<Entry> entries) {
+        messages.clear();
+        transcriptUuids.clear();
+        if (entries == null) {
+            return;
+        }
+        for (Entry entry : entries) {
+            if (entry == null || entry.message() == null) {
+                throw new IllegalArgumentException("entry message must not be null");
+            }
+            messages.add(entry.message());
+            transcriptUuids.add(entry.transcriptUuid());
+        }
+    }
+
     public synchronized void clear() {
         messages.clear();
         transcriptUuids.clear();
@@ -76,5 +99,8 @@ public final class WorkingMemory {
         if (index < 0 || index >= messages.size()) {
             throw new IllegalArgumentException("index out of bounds: " + index);
         }
+    }
+
+    public record Entry(Message message, String transcriptUuid) {
     }
 }

@@ -27,7 +27,7 @@ class ConversationSessionTest {
                 3
         );
         TestMemoryReflection memoryReflection = new TestMemoryReflection(reflected::set);
-        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled(), null);
+        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled());
         session.workingMemory().append(new Message.User("old"));
 
         QueryEngine.QueryResult result = session.handleUserInput("new");
@@ -48,7 +48,7 @@ class ConversationSessionTest {
                 3
         );
         TestMemoryReflection memoryReflection = new TestMemoryReflection(messages -> reflected.set(true));
-        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled(), null);
+        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled());
 
         QueryEngine.QueryResult result = session.handleUserInput("new");
 
@@ -61,7 +61,7 @@ class ConversationSessionTest {
         AtomicBoolean reflected = new AtomicBoolean(false);
         QueryEngine queryEngine = queryEngine(new StaticStreamingClient(), List.of(), 0);
         TestMemoryReflection memoryReflection = new TestMemoryReflection(messages -> reflected.set(true));
-        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled(), null);
+        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled());
 
         QueryEngine.QueryResult result = session.handleUserInput("new");
 
@@ -74,8 +74,7 @@ class ConversationSessionTest {
         ConversationSession session = new ConversationSession(
                 queryEngine(new StaticStreamingClient(), List.of(), 0),
                 null,
-                TranscriptRecorder.disabled(),
-                null
+                TranscriptRecorder.disabled()
         );
         session.workingMemory().append(new Message.User("old"));
 
@@ -85,7 +84,7 @@ class ConversationSessionTest {
     }
 
     private QueryEngine queryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations) {
-        return new QueryEngine(llmClient, tools, maxIterations, ToolPermissionManager.askByDefault(), null);
+        return new QueryEngine(llmClient, tools, maxIterations, ToolPermissionManager.askByDefault(), null, null);
     }
 
     private static final class StaticStreamingClient implements LLMClient {

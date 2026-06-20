@@ -125,7 +125,7 @@ class SlashCommandRegistryTest {
         models.put("A", "model-a-id");
         models.put("B", "model-b-id");
         models.put("C", "model-c-id");
-        Settings settings = new Settings("key", "url", "A", models, 1000, 5, PermissionMode.ASK, Map.of());
+        Settings settings = new Settings("key", "url", "A", models, 1000, 5, PermissionMode.ASK, Map.of(), Settings.Compaction.defaults());
 
         List<TerminalSession.ModelOption> options = TerminalSession.modelOptions(settings);
 
@@ -139,7 +139,7 @@ class SlashCommandRegistryTest {
 
     @Test
     void oldSingleModelConfigIsRejected() {
-        Settings settings = new Settings("key", "url", "legacy-model", null, 1000, 5, PermissionMode.ASK, Map.of());
+        Settings settings = new Settings("key", "url", "legacy-model", null, 1000, 5, PermissionMode.ASK, Map.of(), Settings.Compaction.defaults());
 
         assertFalse(settings.validate().valid());
     }
