@@ -13,7 +13,8 @@ public record TranscriptRecord(
         String cwd,
         String type,
         Message message,
-        CompactBoundary compactBoundary
+        CompactBoundary compactBoundary,
+        SnipCompact snipCompact
 ) {
     public boolean isMessage() {
         return message != null;
@@ -21,6 +22,10 @@ public record TranscriptRecord(
 
     public boolean isCompactBoundary() {
         return compactBoundary != null;
+    }
+
+    public boolean isSnipCompact() {
+        return snipCompact != null;
     }
 
     /**
@@ -34,6 +39,21 @@ public record TranscriptRecord(
             int retryCount,
             String summaryMessageUuid,
             String transcriptPath
+    ) {
+    }
+
+    /**
+     * 工具结果 snip 压缩元数据。
+     */
+    public record SnipCompact(
+            String targetUuid,
+            String toolUseId,
+            String strategy,
+            int thresholdChars,
+            int originalChars,
+            int summaryChars,
+            long tokensFreed,
+            String summary
     ) {
     }
 }

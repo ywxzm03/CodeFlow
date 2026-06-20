@@ -2,6 +2,7 @@ package com.codewarp.terminal;
 
 import com.codewarp.config.ConfigManager;
 import com.codewarp.config.Settings;
+import com.codewarp.compact.SnipCompactor;
 import com.codewarp.core.ConversationSession;
 import com.codewarp.core.Message;
 import com.codewarp.core.QueryEngine;
@@ -58,6 +59,7 @@ public final class TerminalSession implements AutoCloseable {
             ToolPermissionManager toolPermissionManager,
             MemoryReflection memoryReflection,
             TranscriptRecorder transcriptRecorder,
+            SnipCompactor snipCompactor,
             TranscriptStore transcriptStore
     ) {
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
@@ -65,7 +67,8 @@ public final class TerminalSession implements AutoCloseable {
         this.conversationSession = new ConversationSession(
                 Objects.requireNonNull(queryEngine, "queryEngine must not be null"),
                 memoryReflection,
-                activeTranscriptRecorder
+                activeTranscriptRecorder,
+                snipCompactor
         );
         this.llmClient = Objects.requireNonNull(llmClient, "llmClient must not be null");
         this.configManager = Objects.requireNonNull(configManager, "configManager must not be null");

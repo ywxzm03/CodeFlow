@@ -27,7 +27,7 @@ class ConversationSessionTest {
                 3
         );
         TestMemoryReflection memoryReflection = new TestMemoryReflection(reflected::set);
-        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled());
+        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled(), null);
         session.workingMemory().append(new Message.User("old"));
 
         QueryEngine.QueryResult result = session.handleUserInput("new");
@@ -48,7 +48,7 @@ class ConversationSessionTest {
                 3
         );
         TestMemoryReflection memoryReflection = new TestMemoryReflection(messages -> reflected.set(true));
-        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled());
+        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled(), null);
 
         QueryEngine.QueryResult result = session.handleUserInput("new");
 
@@ -61,7 +61,7 @@ class ConversationSessionTest {
         AtomicBoolean reflected = new AtomicBoolean(false);
         QueryEngine queryEngine = queryEngine(new StaticStreamingClient(), List.of(), 0);
         TestMemoryReflection memoryReflection = new TestMemoryReflection(messages -> reflected.set(true));
-        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled());
+        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled(), null);
 
         QueryEngine.QueryResult result = session.handleUserInput("new");
 
@@ -74,7 +74,8 @@ class ConversationSessionTest {
         ConversationSession session = new ConversationSession(
                 queryEngine(new StaticStreamingClient(), List.of(), 0),
                 null,
-                TranscriptRecorder.disabled()
+                TranscriptRecorder.disabled(),
+                null
         );
         session.workingMemory().append(new Message.User("old"));
 

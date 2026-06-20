@@ -64,10 +64,10 @@ public final class TranscriptStore {
     /**
      * 追加写入本轮消息。
      */
-    public void append(String sessionId, List<Message> messages) throws IOException {
+    public List<String> append(String sessionId, List<Message> messages) throws IOException {
         validateSessionId(sessionId);
         if (messages == null || messages.isEmpty()) {
-            return;
+            return List.of();
         }
 
         Files.createDirectories(transcriptRoot);
@@ -75,12 +75,14 @@ public final class TranscriptStore {
         String parentUuid = lastUuid(path);
         String cwd = Paths.get("").toAbsolutePath().normalize().toString();
         StringBuilder lines = new StringBuilder();
+        List<String> uuids = new ArrayList<>();
 
         for (Message message : messages) {
             if (message == null) {
                 continue;
             }
             String uuid = UUID.randomUUID().toString();
+            uuids.add(uuid);
             TranscriptEntry entry = new TranscriptEntry(
                     uuid,
                     parentUuid,
@@ -96,6 +98,7 @@ public final class TranscriptStore {
         if (!lines.isEmpty()) {
             Files.writeString(path, lines.toString(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         }
+        return List.copyOf(uuids);
     }
 
     /**
@@ -118,7 +121,40 @@ public final class TranscriptStore {
                 Paths.get("").toAbsolutePath().normalize().toString(),
                 "compact_boundary",
                 null,
-                boundary
+                boundary,
+                null
+        );
+        Files.writeString(
+                path,
+                objectMapper.writeValueAsString(toJson(record)) + System.lineSeparator(),
+                StandardOpenOption.CREATE,
+                StandardOpenOption.APPEND
+        );
+        return uuid;
+    }
+
+    /**
+     * 追加写入 snip compact 元数据。
+     */
+    public String appendSnipCompact(String sessionId, TranscriptRecord.SnipCompact snip) throws IOException {
+        validateSessionId(sessionId);
+        if (snip == null) {
+            throw new IllegalArgumentException("snip must not be null");
+        }
+
+        Files.createDirectories(transcriptRoot);
+        Path path = sessionPath(sessionId);
+        String uuid = UUID.randomUUID().toString();
+        TranscriptRecord record = new TranscriptRecord(
+                uuid,
+                lastUuid(path),
+                sessionId,
+                OffsetDateTime.now().toString(),
+                Paths.get("").toAbsolutePath().normalize().toString(),
+                "snip_compact",
+                null,
+                null,
+                snip
         );
         Files.writeString(
                 path,
@@ -161,13 +197,35 @@ public final class TranscriptStore {
         Collections.reverse(chain);
         int startIndex = indexAfterLastCompactBoundary(chain);
         List<Message> messages = new ArrayList<>();
+        Map<String, TranscriptRecord.SnipCompact> snipsByTarget = snipsByTarget(chain, startIndex);
         for (int i = startIndex; i < chain.size(); i++) {
             TranscriptRecord record = chain.get(i);
             if (record.isMessage()) {
-                messages.add(record.message());
+                messages.add(applySnip(record, snipsByTarget.get(record.uuid())));
             }
         }
         return List.copyOf(messages);
+    }
+
+    private Map<String, TranscriptRecord.SnipCompact> snipsByTarget(List<TranscriptRecord> records, int startIndex) {
+        Map<String, TranscriptRecord.SnipCompact> snips = new HashMap<>();
+        for (int i = startIndex; i < records.size(); i++) {
+            TranscriptRecord record = records.get(i);
+            if (record.isSnipCompact()) {
+                snips.put(record.snipCompact().targetUuid(), record.snipCompact());
+            }
+        }
+        return snips;
+    }
+
+    private Message applySnip(TranscriptRecord record, TranscriptRecord.SnipCompact snip) {
+        if (snip == null || !(record.message() instanceof Message.ToolResult toolResult)) {
+            return record.message();
+        }
+        if (!toolResult.toolUseId().equals(snip.toolUseId())) {
+            return record.message();
+        }
+        return new Message.ToolResult(toolResult.toolUseId(), snip.summary(), toolResult.isError());
     }
 
     private int indexAfterLastCompactBoundary(List<TranscriptRecord> records) {
@@ -294,6 +352,8 @@ public final class TranscriptStore {
             node.set("message", anthropicMessageToJson(record.message()));
         } else if (record.isCompactBoundary()) {
             node.set("compact", compactBoundaryToJson(record.compactBoundary()));
+        } else if (record.isSnipCompact()) {
+            node.set("snip", snipCompactToJson(record.snipCompact()));
         }
         return node;
     }
@@ -311,6 +371,19 @@ public final class TranscriptStore {
             node.put("summary_message_uuid", boundary.summaryMessageUuid());
         }
         node.put("transcript_path", boundary.transcriptPath());
+        return node;
+    }
+
+    private ObjectNode snipCompactToJson(TranscriptRecord.SnipCompact snip) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("targetUuid", snip.targetUuid());
+        node.put("tool_use_id", snip.toolUseId());
+        node.put("strategy", snip.strategy());
+        node.put("threshold_chars", snip.thresholdChars());
+        node.put("original_chars", snip.originalChars());
+        node.put("summary_chars", snip.summaryChars());
+        node.put("tokens_freed", snip.tokensFreed());
+        node.put("summary", snip.summary());
         return node;
     }
 
@@ -405,7 +478,10 @@ public final class TranscriptStore {
         TranscriptRecord.CompactBoundary compactBoundary = "compact_boundary".equals(type)
                 ? parseCompactBoundary(node.get("compact"))
                 : null;
-        if (message == null && compactBoundary == null) {
+        TranscriptRecord.SnipCompact snipCompact = "snip_compact".equals(type)
+                ? parseSnipCompact(node.get("snip"))
+                : null;
+        if (message == null && compactBoundary == null && snipCompact == null) {
             throw new IllegalArgumentException("未知 transcript record 类型: " + type);
         }
         return new TranscriptRecord(
@@ -416,7 +492,8 @@ public final class TranscriptStore {
                 requiredText(node, "cwd"),
                 type,
                 message,
-                compactBoundary
+                compactBoundary,
+                snipCompact
         );
     }
 
@@ -436,6 +513,22 @@ public final class TranscriptStore {
                 (int) optionalLong(node, "retry_count"),
                 optionalText(node, "summary_message_uuid"),
                 requiredText(node, "transcript_path")
+        );
+    }
+
+    private TranscriptRecord.SnipCompact parseSnipCompact(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            throw new IllegalArgumentException("snip compact 必须是对象");
+        }
+        return new TranscriptRecord.SnipCompact(
+                requiredText(node, "targetUuid"),
+                requiredText(node, "tool_use_id"),
+                requiredText(node, "strategy"),
+                (int) optionalLong(node, "threshold_chars"),
+                (int) optionalLong(node, "original_chars"),
+                (int) optionalLong(node, "summary_chars"),
+                optionalLong(node, "tokens_freed"),
+                requiredText(node, "summary")
         );
     }
 

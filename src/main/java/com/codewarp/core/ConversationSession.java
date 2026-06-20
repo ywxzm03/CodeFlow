@@ -1,5 +1,6 @@
 package com.codewarp.core;
 
+import com.codewarp.compact.SnipCompactor;
 import com.codewarp.memory.MemoryReflection;
 import com.codewarp.memory.TranscriptRecorder;
 
@@ -16,21 +17,31 @@ public final class ConversationSession {
     private final WorkingMemory workingMemory;
     private final MemoryReflection memoryReflection;
     private final TranscriptRecorder transcriptRecorder;
+    private final SnipCompactor snipCompactor;
 
     public ConversationSession(
             QueryEngine queryEngine,
             MemoryReflection memoryReflection,
-            TranscriptRecorder transcriptRecorder
+            TranscriptRecorder transcriptRecorder,
+            SnipCompactor snipCompactor
     ) {
         this.queryEngine = Objects.requireNonNull(queryEngine, "queryEngine must not be null");
         this.workingMemory = new WorkingMemory();
         this.memoryReflection = memoryReflection;
         this.transcriptRecorder = Objects.requireNonNull(transcriptRecorder, "transcriptRecorder must not be null");
+        this.snipCompactor = snipCompactor;
     }
 
     public QueryEngine.QueryResult handleUserInput(String input) {
+        if (snipCompactor != null) {
+            snipCompactor.compact(workingMemory);
+        }
+        int startIndex = workingMemory.size();
         QueryEngine.QueryResult result = queryEngine.query(input, workingMemory);
-        transcriptRecorder.record(result.turnMessages());
+        List<String> uuids = transcriptRecorder.recordWithUuids(result.turnMessages());
+        for (int i = 0; i < uuids.size() && i < result.turnMessages().size(); i++) {
+            workingMemory.markTranscriptUuid(startIndex + i, uuids.get(i));
+        }
         if (result.stopReason() == QueryEngine.QueryResult.StopReason.COMPLETED && memoryReflection != null) {
             memoryReflection.reflect(result.turnMessages());
         }

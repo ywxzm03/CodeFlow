@@ -43,14 +43,19 @@ public final class TranscriptRecorder {
     }
 
     public void record(List<Message> messages) {
+        recordWithUuids(messages);
+    }
+
+    public List<String> recordWithUuids(List<Message> messages) {
         if (!enabled() || messages == null || messages.isEmpty()) {
-            return;
+            return List.of();
         }
 
         try {
-            transcriptStore.append(sessionId, messages);
+            return transcriptStore.append(sessionId, messages);
         } catch (IOException | IllegalArgumentException e) {
             Console.warn("[Memory] 写入 transcript 失败，已跳过: " + e.getMessage());
+            return List.of();
         }
     }
 

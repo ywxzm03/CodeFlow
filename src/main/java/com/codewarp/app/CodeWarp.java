@@ -2,6 +2,8 @@ package com.codewarp.app;
 
 import com.codewarp.config.ConfigManager;
 import com.codewarp.config.Settings;
+import com.codewarp.compact.SnipCompactor;
+import com.codewarp.compact.TokenEstimator;
 import com.codewarp.core.QueryEngine;
 import com.codewarp.llm.AnthropicClient;
 import com.codewarp.llm.LLMClient;
@@ -120,9 +122,12 @@ public class CodeWarp {
                 toolPermissionManager,
                 memoryContextProvider
         );
+        SnipCompactor snipCompactor = transcriptStore == null
+                ? null
+                : new SnipCompactor(8000, new TokenEstimator(), transcriptRecorder, transcriptStore);
 
         // 启动终端交互
-        new TerminalSession(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, transcriptRecorder, transcriptStore).run();
+        new TerminalSession(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, transcriptRecorder, snipCompactor, transcriptStore).run();
     }
 
     /**

@@ -29,7 +29,8 @@ class ConversationSessionTranscriptTest {
         ConversationSession session = new ConversationSession(
                 queryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
                 null,
-                recorder
+                recorder,
+                null
         );
 
         session.handleUserInput("hello");
@@ -47,7 +48,8 @@ class ConversationSessionTranscriptTest {
         ConversationSession session = new ConversationSession(
                 queryEngine(new StaticStreamingClient(Flux.error(new RuntimeException("boom"))), List.of(), 3),
                 null,
-                recorder
+                recorder,
+                null
         );
 
         session.handleUserInput("hello");
@@ -63,7 +65,8 @@ class ConversationSessionTranscriptTest {
         ConversationSession session = new ConversationSession(
                 queryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
                 null,
-                recorder
+                recorder,
+                null
         );
         session.workingMemory().append(new Message.User("current"));
 
@@ -97,7 +100,8 @@ class ConversationSessionTranscriptTest {
         ConversationSession session = new ConversationSession(
                 queryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
                 null,
-                recorder
+                recorder,
+                null
         );
 
         QueryEngine.QueryResult result = session.handleUserInput("hello");

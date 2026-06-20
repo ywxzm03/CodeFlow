@@ -129,6 +129,33 @@ class TranscriptStoreTest {
     }
 
     @Test
+    void loadMessagesForResumeAppliesSnipMetadata() throws Exception {
+        TranscriptStore store = initializedStore();
+        List<String> uuids = store.append("session-a", List.of(
+                new Message.ToolResult("toolu_1", "full content", false)
+        ));
+        store.appendSnipCompact("session-a", new TranscriptRecord.SnipCompact(
+                uuids.getFirst(),
+                "toolu_1",
+                "tool_result_summary",
+                8,
+                12,
+                7,
+                2,
+                "summary"
+        ));
+
+        assertEquals(
+                List.of(new Message.ToolResult("toolu_1", "summary", false)),
+                store.loadMessagesForResume("session-a")
+        );
+        assertEquals(
+                List.of(new Message.ToolResult("toolu_1", "full content", false)),
+                store.loadMessages("session-a")
+        );
+    }
+
+    @Test
     void listsSessions() throws Exception {
         TranscriptStore store = initializedStore();
         store.append("session-a", List.of(new Message.User("hello")));
