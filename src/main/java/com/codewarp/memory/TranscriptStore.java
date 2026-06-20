@@ -14,8 +14,13 @@ import java.nio.file.StandardOpenOption;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -97,6 +102,33 @@ public final class TranscriptStore {
         return loadEntries(sessionId).stream()
                 .map(TranscriptEntry::message)
                 .toList();
+    }
+
+    /**
+     * 从最后一条记录沿 parentUuid 恢复会话链。
+     */
+    public List<Message> loadMessagesForResume(String sessionId) throws IOException {
+        List<TranscriptEntry> entries = loadEntries(sessionId);
+        if (entries.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, TranscriptEntry> byUuid = new HashMap<>();
+        for (TranscriptEntry entry : entries) {
+            byUuid.put(entry.uuid(), entry);
+        }
+
+        List<Message> messages = new ArrayList<>();
+        Set<String> visited = new HashSet<>();
+        TranscriptEntry current = entries.getLast();
+        while (current != null && visited.add(current.uuid())) {
+            messages.add(current.message());
+            String parentUuid = current.parentUuid();
+            current = parentUuid == null ? null : byUuid.get(parentUuid);
+        }
+
+        Collections.reverse(messages);
+        return List.copyOf(messages);
     }
 
     /**

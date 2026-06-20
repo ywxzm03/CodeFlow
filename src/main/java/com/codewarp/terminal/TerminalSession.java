@@ -367,7 +367,7 @@ public final class TerminalSession implements AutoCloseable {
                 return;
             }
 
-            List<Message> messages = transcriptStore.loadMessages(sessionId);
+            List<Message> messages = transcriptStore.loadMessagesForResume(sessionId);
             conversationSession.resume(sessionId, messages);
             terminal.writer().println("Resumed session: " + sessionId);
             terminal.writer().flush();
