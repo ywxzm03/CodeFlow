@@ -207,40 +207,64 @@ public final class TranscriptStore {
         node.put("sessionId", entry.sessionId());
         node.put("timestamp", entry.timestamp());
         node.put("cwd", entry.cwd());
-        node.set("message", messageToJson(entry.message()));
+        node.put("type", messageType(entry.message()));
+        node.set("message", anthropicMessageToJson(entry.message()));
         return node;
     }
 
-    private ObjectNode messageToJson(Message message) {
+    private String messageType(Message message) {
+        return switch (message) {
+            case Message.User ignored -> "user";
+            case Message.Assistant ignored -> "assistant";
+            case Message.ToolResult ignored -> "user";
+        };
+    }
+
+    private ObjectNode anthropicMessageToJson(Message message) {
         ObjectNode node = objectMapper.createObjectNode();
         switch (message) {
             case Message.User user -> {
-                node.put("type", "user");
+                node.put("role", "user");
                 node.put("content", user.content());
             }
             case Message.Assistant assistant -> {
-                node.put("type", "assistant");
-                node.put("content", assistant.content());
-                ArrayNode toolUses = objectMapper.createArrayNode();
-                if (assistant.toolUses() != null) {
-                    for (Message.ToolUse toolUse : assistant.toolUses()) {
-                        ObjectNode toolUseNode = objectMapper.createObjectNode();
-                        toolUseNode.put("id", toolUse.id());
-                        toolUseNode.put("name", toolUse.name());
-                        toolUseNode.put("input", toolUse.input());
-                        toolUses.add(toolUseNode);
-                    }
-                }
-                node.set("toolUses", toolUses);
+                node.put("role", "assistant");
+                node.set("content", assistantContentToJson(assistant));
             }
             case Message.ToolResult toolResult -> {
-                node.put("type", "tool_result");
-                node.put("toolUseId", toolResult.toolUseId());
-                node.put("content", toolResult.content());
-                node.put("isError", toolResult.isError());
+                node.put("role", "user");
+                ArrayNode content = objectMapper.createArrayNode();
+                ObjectNode toolResultNode = objectMapper.createObjectNode();
+                toolResultNode.put("type", "tool_result");
+                toolResultNode.put("tool_use_id", toolResult.toolUseId());
+                toolResultNode.put("content", toolResult.content());
+                toolResultNode.put("is_error", toolResult.isError());
+                content.add(toolResultNode);
+                node.set("content", content);
             }
         }
         return node;
+    }
+
+    private ArrayNode assistantContentToJson(Message.Assistant assistant) {
+        ArrayNode content = objectMapper.createArrayNode();
+        if (assistant.content() != null && !assistant.content().isBlank()) {
+            ObjectNode textNode = objectMapper.createObjectNode();
+            textNode.put("type", "text");
+            textNode.put("text", assistant.content());
+            content.add(textNode);
+        }
+        if (assistant.toolUses() != null) {
+            for (Message.ToolUse toolUse : assistant.toolUses()) {
+                ObjectNode toolUseNode = objectMapper.createObjectNode();
+                toolUseNode.put("type", "tool_use");
+                toolUseNode.put("id", toolUse.id());
+                toolUseNode.put("name", toolUse.name());
+                toolUseNode.put("input", toolUse.input());
+                content.add(toolUseNode);
+            }
+        }
+        return content;
     }
 
     /**
@@ -253,47 +277,86 @@ public final class TranscriptStore {
                 requiredText(node, "sessionId"),
                 requiredText(node, "timestamp"),
                 requiredText(node, "cwd"),
-                parseMessage(node.get("message"))
+                parseMessage(requiredText(node, "type"), node.get("message"))
         );
     }
 
     /**
      * 还原消息模型。
      */
-    private Message parseMessage(JsonNode node) {
+    private Message parseMessage(String type, JsonNode node) {
         if (node == null || !node.isObject()) {
             throw new IllegalArgumentException("transcript message 必须是对象");
         }
 
-        return switch (requiredText(node, "type")) {
-            case "user" -> new Message.User(requiredText(node, "content"));
-            case "assistant" -> new Message.Assistant(optionalText(node, "content"), parseToolUses(node.get("toolUses")));
-            case "tool_result" -> new Message.ToolResult(
-                    requiredText(node, "toolUseId"),
-                    requiredText(node, "content"),
-                    requiredBoolean(node, "isError")
-            );
-            default -> throw new IllegalArgumentException("未知 transcript message 类型: " + requiredText(node, "type"));
+        return switch (type) {
+            case "user" -> parseUserMessage(node);
+            case "assistant" -> parseAssistantMessage(node);
+            default -> throw new IllegalArgumentException("未知 transcript message 类型: " + type);
         };
     }
 
-    private List<Message.ToolUse> parseToolUses(JsonNode node) {
-        if (node == null || node.isNull()) {
-            return List.of();
+    private Message parseUserMessage(JsonNode node) {
+        JsonNode content = node.get("content");
+        if (content != null && content.isArray() && !content.isEmpty()) {
+            JsonNode firstBlock = content.get(0);
+            if ("tool_result".equals(optionalText(firstBlock, "type"))) {
+                return parseToolResultMessage(node);
+            }
         }
-        if (!node.isArray()) {
-            throw new IllegalArgumentException("toolUses 必须是数组");
+        return new Message.User(requiredText(node, "content"));
+    }
+
+    private Message.ToolResult parseToolResultMessage(JsonNode node) {
+        JsonNode block = firstContentBlock(node, "tool_result");
+        return new Message.ToolResult(
+                requiredText(block, "tool_use_id"),
+                requiredText(block, "content"),
+                requiredBoolean(block, "is_error")
+        );
+    }
+
+    private Message.Assistant parseAssistantMessage(JsonNode node) {
+        JsonNode content = node.get("content");
+        if (content == null || !content.isArray()) {
+            throw new IllegalArgumentException("assistant content 必须是数组");
         }
 
+        StringBuilder text = new StringBuilder();
         List<Message.ToolUse> toolUses = new ArrayList<>();
-        for (JsonNode toolUse : node) {
-            toolUses.add(new Message.ToolUse(
-                    requiredText(toolUse, "id"),
-                    requiredText(toolUse, "name"),
-                    requiredText(toolUse, "input")
-            ));
+        for (JsonNode block : content) {
+            String blockType = requiredText(block, "type");
+            if ("text".equals(blockType)) {
+                if (!text.isEmpty()) {
+                    text.append('\n');
+                }
+                text.append(requiredText(block, "text"));
+            } else if ("tool_use".equals(blockType)) {
+                toolUses.add(new Message.ToolUse(
+                        requiredText(block, "id"),
+                        requiredText(block, "name"),
+                        requiredText(block, "input")
+                ));
+            }
         }
-        return List.copyOf(toolUses);
+        return new Message.Assistant(text.toString(), List.copyOf(toolUses));
+    }
+
+    private JsonNode firstContentBlock(JsonNode node, String expectedType) {
+        if (node == null || node.isNull()) {
+            throw new IllegalArgumentException("message 不能为空");
+        }
+        JsonNode content = node.get("content");
+        if (content == null || !content.isArray() || content.isEmpty()) {
+            throw new IllegalArgumentException("message content 必须是非空数组");
+        }
+
+        JsonNode block = content.get(0);
+        String actualType = requiredText(block, "type");
+        if (!expectedType.equals(actualType)) {
+            throw new IllegalArgumentException("message content 类型错误: " + actualType);
+        }
+        return block;
     }
 
     /**

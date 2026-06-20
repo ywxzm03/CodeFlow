@@ -45,7 +45,13 @@ class TranscriptStoreTest {
                 ),
                 store.loadMessages("session-a")
         );
-        assertTrue(Files.readString(tempDir.resolve("memory/L5/session-a.jsonl")).contains("\"parentUuid\""));
+        String transcript = Files.readString(tempDir.resolve("memory/L5/session-a.jsonl"));
+        assertTrue(transcript.contains("\"parentUuid\""));
+        assertTrue(transcript.contains("\"type\":\"user\""));
+        assertTrue(transcript.contains("\"message\":{\"role\":\"user\",\"content\":\"hello\"}"));
+        assertTrue(transcript.contains("\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\""));
+        assertFalse(transcript.contains("\"type\":\"tool_result\",\"message\""));
+        assertFalse(transcript.contains("\"message\":{\"type\":\"user\""));
     }
 
     @Test
@@ -63,9 +69,9 @@ class TranscriptStoreTest {
     void loadMessagesForResumeFollowsLastParentChain() throws Exception {
         TranscriptStore store = initializedStore();
         Files.writeString(tempDir.resolve("memory/L5/session-a.jsonl"), """
-                {"uuid":"root","parentUuid":null,"sessionId":"session-a","timestamp":"2026-06-20T00:00:00Z","cwd":"/tmp","message":{"type":"user","content":"root"}}
-                {"uuid":"main","parentUuid":"root","sessionId":"session-a","timestamp":"2026-06-20T00:00:01Z","cwd":"/tmp","message":{"type":"assistant","content":"main","toolUses":[]}}
-                {"uuid":"branch","parentUuid":"root","sessionId":"session-a","timestamp":"2026-06-20T00:00:02Z","cwd":"/tmp","message":{"type":"user","content":"branch"}}
+                {"uuid":"root","parentUuid":null,"sessionId":"session-a","timestamp":"2026-06-20T00:00:00Z","cwd":"/tmp","type":"user","message":{"role":"user","content":"root"}}
+                {"uuid":"main","parentUuid":"root","sessionId":"session-a","timestamp":"2026-06-20T00:00:01Z","cwd":"/tmp","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"main"}]}}
+                {"uuid":"branch","parentUuid":"root","sessionId":"session-a","timestamp":"2026-06-20T00:00:02Z","cwd":"/tmp","type":"user","message":{"role":"user","content":"branch"}}
                 """);
 
         assertEquals(
