@@ -122,8 +122,11 @@ public record Settings(
         if (resolvedCompaction.autoCompactThresholdRatio() <= 0 || resolvedCompaction.autoCompactThresholdRatio() >= 1) {
             return ValidationResult.error("Compaction auto_compact_threshold_ratio 必须在0到1之间");
         }
-        if (resolvedCompaction.autoCompactHotMessages() < 0 || resolvedCompaction.reactiveCompactHotMessages() < 0) {
-            return ValidationResult.error("Compaction hot message 数不能小于0");
+        if (resolvedCompaction.autoCompactHotMessages() < 0) {
+            return ValidationResult.error("Compaction auto_compact_hot_messages 不能小于0");
+        }
+        if (resolvedCompaction.reactiveCompactHotMessages() <= 0) {
+            return ValidationResult.error("Compaction reactive_compact_hot_messages 必须大于0");
         }
         return ValidationResult.ok();
     }

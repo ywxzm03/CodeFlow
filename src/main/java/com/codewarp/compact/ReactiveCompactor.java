@@ -13,9 +13,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 自动上下文压缩器。
+ * 上下文超限后的兜底压缩器。
  */
-public final class AutoCompactor {
+public final class ReactiveCompactor {
 
     private final CompactionPolicy policy;
     private final TokenEstimator tokenEstimator;
@@ -23,7 +23,7 @@ public final class AutoCompactor {
     private final TranscriptRecorder transcriptRecorder;
     private final TranscriptStore transcriptStore;
 
-    public AutoCompactor(
+    public ReactiveCompactor(
             CompactionPolicy policy,
             TokenEstimator tokenEstimator,
             LLMClient llmClient,
@@ -37,26 +37,19 @@ public final class AutoCompactor {
         this.transcriptStore = transcriptStore;
     }
 
-    public Result compactIfNeeded(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools, long tokensFreed) {
+    public Result compact(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools, int retryCount) {
         if (!policy.enabled() || workingMemory == null || !transcriptRecorder.enabled() || transcriptStore == null) {
             return Result.notCompacted();
         }
 
-        long estimatedTokens = Math.max(0, tokenEstimator.estimate(systemPrompt, workingMemory.snapshot(), tools) - tokensFreed);
-        if (estimatedTokens < policy.autoCompactThresholdTokens()) {
-            return Result.notCompacted();
-        }
-        return compact(workingMemory, estimatedTokens);
-    }
-
-    private Result compact(WorkingMemory workingMemory, long estimatedTokensBefore) {
         List<Message> before = workingMemory.snapshot();
         if (before.isEmpty()) {
             return Result.notCompacted();
         }
         transcriptRecorder.recordUnpersisted(workingMemory);
 
-        List<Message> preserved = CompactionSupport.preservedMessages(before, policy.autoCompactHotMessages(), true);
+        long estimatedTokens = tokenEstimator.estimate(systemPrompt, before, tools);
+        List<Message> preserved = CompactionSupport.preservedMessages(before, policy.reactiveCompactHotMessages(), false);
         List<Message> cold = before.stream()
                 .filter(message -> !preserved.contains(message))
                 .toList();
@@ -73,11 +66,11 @@ public final class AutoCompactor {
             String boundaryUuid = transcriptStore.appendCompactBoundary(
                     transcriptRecorder.sessionId(),
                     new TranscriptRecord.CompactBoundary(
-                            "auto",
-                            "token_threshold",
-                            estimatedTokensBefore,
-                            policy.autoCompactHotMessages(),
-                            0,
+                            "reactive",
+                            "context_overflow_error",
+                            estimatedTokens,
+                            policy.reactiveCompactHotMessages(),
+                            retryCount,
                             null,
                             transcriptRecorder.transcriptPath()
                     )
@@ -89,12 +82,8 @@ public final class AutoCompactor {
             return new Result(true, boundaryUuid, after.size());
         } catch (IOException | IllegalArgumentException e) {
             workingMemory.restore(originalEntries);
-            throw new IllegalStateException("写入 auto compact transcript 失败: " + e.getMessage(), e);
+            throw new IllegalStateException("写入 reactive compact transcript 失败: " + e.getMessage(), e);
         }
-    }
-
-    List<Message> preservedMessages(List<Message> messages, int hotMessageCount, boolean keepKeywordMessages) {
-        return CompactionSupport.preservedMessages(messages, hotMessageCount, keepKeywordMessages);
     }
 
     public record Result(boolean compacted, String boundaryUuid, int messageCount) {

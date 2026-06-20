@@ -1,14 +1,24 @@
 package com.codewarp.core;
 
+import com.codewarp.compact.AutoCompactor;
+import com.codewarp.compact.CompactionManager;
+import com.codewarp.compact.CompactionPolicy;
+import com.codewarp.compact.ReactiveCompactor;
+import com.codewarp.compact.SnipCompactor;
+import com.codewarp.compact.TokenEstimator;
 import com.codewarp.llm.LLMClient;
+import com.codewarp.memory.TranscriptRecorder;
+import com.codewarp.memory.TranscriptStore;
 import com.codewarp.permissions.PermissionMode;
 import com.codewarp.permissions.ToolPermission;
 import com.codewarp.permissions.ToolPermissionConfig;
 import com.codewarp.permissions.ToolPermissionManager;
 import com.codewarp.tools.Tool;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -17,6 +27,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class QueryEngineWorkingMemoryTest {
+
+    @TempDir
+    Path tempDir;
 
     @Test
     void subsequentQueriesUsePreviousWorkingMemory() {
@@ -101,6 +114,43 @@ class QueryEngineWorkingMemoryTest {
         assertTrue(result.turnMessages().isEmpty());
     }
 
+    @Test
+    void contextOverflowTriggersReactiveCompactAndRetries() throws Exception {
+        TranscriptStore store = new TranscriptStore(tempDir.resolve("memory/L5"));
+        store.initialize();
+        TranscriptRecorder recorder = new TranscriptRecorder(store, "session-a");
+        TokenEstimator estimator = new TokenEstimator();
+        CompactionPolicy policy = new CompactionPolicy(true, 10_000, 8_000, 0.99, 5, 1);
+        RetryingStreamingClient client = new RetryingStreamingClient();
+        CompactionManager compactionManager = new CompactionManager(
+                new SnipCompactor(policy.snipToolResultThresholdChars(), estimator, recorder, store),
+                new AutoCompactor(policy, estimator, client, recorder, store),
+                new ReactiveCompactor(policy, estimator, client, recorder, store)
+        );
+        QueryEngine queryEngine = new QueryEngine(
+                client,
+                List.of(),
+                3,
+                ToolPermissionManager.askByDefault(),
+                null,
+                compactionManager
+        );
+        WorkingMemory memory = new WorkingMemory();
+        memory.append(new Message.User("old"));
+
+        QueryEngine.QueryResult result = queryEngine.query("new", memory);
+
+        assertEquals(QueryEngine.QueryResult.StopReason.COMPLETED, result.stopReason());
+        assertEquals("done", result.finalResponse());
+        assertEquals(2, client.streamingCalls);
+        assertTrue(memory.snapshot().stream().anyMatch(message ->
+                message instanceof Message.User user && user.content().contains("reactive summary")
+        ));
+        assertTrue(store.loadRecords("session-a").stream().anyMatch(record ->
+                record.isCompactBoundary() && "reactive".equals(record.compactBoundary().mode())
+        ));
+    }
+
     private Tool testTool() {
         return new Tool() {
             @Override
@@ -164,6 +214,28 @@ class QueryEngineWorkingMemoryTest {
         public Flux<StreamEvent> callStreaming(String systemPrompt, List<Message> messages, List<Tool> tools) {
             calls.add(List.copyOf(messages));
             return responses.get(Math.min(responseIndex++, responses.size() - 1));
+        }
+
+        @Override
+        public void setModel(String model) {
+        }
+    }
+
+    private static final class RetryingStreamingClient implements LLMClient {
+        private int streamingCalls;
+
+        @Override
+        public LLMResponse call(String systemPrompt, List<Message> messages, List<Tool> tools) {
+            return new LLMResponse("reactive summary", List.of(), null);
+        }
+
+        @Override
+        public Flux<StreamEvent> callStreaming(String systemPrompt, List<Message> messages, List<Tool> tools) {
+            streamingCalls++;
+            if (streamingCalls == 1) {
+                return Flux.error(new RuntimeException("context length exceeded"));
+            }
+            return Flux.just(new StreamEvent.TextDelta("done"));
         }
 
         @Override

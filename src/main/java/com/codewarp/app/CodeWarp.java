@@ -5,6 +5,7 @@ import com.codewarp.config.Settings;
 import com.codewarp.compact.AutoCompactor;
 import com.codewarp.compact.CompactionManager;
 import com.codewarp.compact.CompactionPolicy;
+import com.codewarp.compact.ReactiveCompactor;
 import com.codewarp.compact.SnipCompactor;
 import com.codewarp.compact.TokenEstimator;
 import com.codewarp.core.QueryEngine;
@@ -132,7 +133,8 @@ public class CodeWarp {
             TokenEstimator tokenEstimator = new TokenEstimator();
             SnipCompactor snipCompactor = new SnipCompactor(policy.snipToolResultThresholdChars(), tokenEstimator, transcriptRecorder, transcriptStore);
             AutoCompactor autoCompactor = new AutoCompactor(policy, tokenEstimator, llmClient, transcriptRecorder, transcriptStore);
-            compactionManager = new CompactionManager(snipCompactor, autoCompactor);
+            ReactiveCompactor reactiveCompactor = new ReactiveCompactor(policy, tokenEstimator, llmClient, transcriptRecorder, transcriptStore);
+            compactionManager = new CompactionManager(snipCompactor, autoCompactor, reactiveCompactor);
         }
 
         // 组装查询引擎。

@@ -107,13 +107,23 @@ public class QueryEngine {
      * 流式执行模式的迭代
      */
     private QueryResult executeStreamingIteration(WorkingMemory workingMemory, TurnState turnState, int iteration) {
-        // 创建流式工具执行器
-        StreamingToolExecutor executor = new StreamingToolExecutor(tools, toolPermissionManager);
         String systemPrompt = systemPrompt();
         if (compactionManager != null) {
             compactionManager.beforeModelCall(systemPrompt, workingMemory, tools);
         }
 
+        return executeStreamingAttempt(workingMemory, turnState, iteration, systemPrompt, true);
+    }
+
+    private QueryResult executeStreamingAttempt(
+            WorkingMemory workingMemory,
+            TurnState turnState,
+            int iteration,
+            String systemPrompt,
+            boolean allowReactiveRetry
+    ) {
+        // 创建流式工具执行器
+        StreamingToolExecutor executor = new StreamingToolExecutor(tools, toolPermissionManager);
         try {
             StringBuilder contentBuilder = new StringBuilder();
             List<Message.ToolUse> allToolUses = new ArrayList<>();
@@ -136,6 +146,20 @@ public class QueryEngine {
                         })
                         .blockLast();
             } catch (RuntimeException streamError) {
+                if (allowReactiveRetry && compactionManager != null) {
+                    executor.discard();
+                    CompactionManager.ReactiveResult reactiveResult = compactionManager.reactiveCompact(
+                            systemPrompt,
+                            workingMemory,
+                            tools,
+                            streamError,
+                            1
+                    );
+                    if (reactiveResult.compacted()) {
+                        Console.warn("\n[Compact] 上下文超限，已触发 reactive compact 并重试本轮模型调用");
+                        return executeStreamingAttempt(workingMemory, turnState, iteration, systemPrompt, false);
+                    }
+                }
                 // 流式中断：取消已启动的工具，丢弃本轮所有副作用，不写入半截消息
                 executor.discard();
                 rollbackCurrentTurn(workingMemory, turnState);
