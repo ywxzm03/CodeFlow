@@ -47,6 +47,10 @@ public final class ConversationSession {
         workingMemory.clear();
     }
 
+    public QueryEngine.CompactResult compact() {
+        return queryEngine.compact(workingMemory);
+    }
+
     public WorkingMemory workingMemory() {
         return workingMemory;
     }

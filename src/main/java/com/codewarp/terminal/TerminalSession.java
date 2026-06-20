@@ -199,6 +199,11 @@ public final class TerminalSession implements AutoCloseable {
             return;
         }
 
+        if ("/compact".equals(input)) {
+            handleCompactCommand();
+            return;
+        }
+
         if ("/model".equals(input)) {
             handleModelCommand();
             return;
@@ -237,6 +242,19 @@ public final class TerminalSession implements AutoCloseable {
         terminal.puts(InfoCmp.Capability.clear_screen);
         terminal.flush();
         terminal.writer().println("Working memory cleared.");
+        terminal.writer().flush();
+    }
+
+    private void handleCompactCommand() {
+        QueryEngine.CompactResult result = conversationSession.compact();
+        switch (result.status()) {
+            case COMPACTED -> terminal.writer().println(
+                    "Compact completed. Working memory: " + result.beforeMessages() + " -> " + result.afterMessages() + " messages."
+            );
+            case NOT_NEEDED -> terminal.writer().println("Nothing to compact.");
+            case UNAVAILABLE -> terminal.writer().println("Compact is unavailable: " + result.reason() + ".");
+            case FAILED -> terminal.writer().println("Compact failed: " + result.reason());
+        }
         terminal.writer().flush();
     }
 

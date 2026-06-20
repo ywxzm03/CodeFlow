@@ -50,19 +50,52 @@ public final class AutoCompactor {
         return compact(workingMemory, estimatedTokens);
     }
 
+    /**
+     * 手动触发 auto compact，不检查 token 阈值。
+     */
+    public ForceResult forceCompact(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools) {
+        if (!policy.enabled()) {
+            return ForceResult.unavailable("compaction is disabled");
+        }
+        if (workingMemory == null) {
+            return ForceResult.unavailable("working memory is unavailable");
+        }
+        if (!transcriptRecorder.enabled() || transcriptStore == null) {
+            return ForceResult.unavailable("transcript is disabled");
+        }
+        if (workingMemory.size() == 0) {
+            return ForceResult.notNeeded();
+        }
+
+        long estimatedTokens = tokenEstimator.estimate(systemPrompt, workingMemory.snapshot(), tools);
+        Result result = compact(workingMemory, estimatedTokens, "manual_command");
+        if (!result.compacted()) {
+            return ForceResult.notNeeded();
+        }
+        return ForceResult.compacted(result.boundaryUuid(), result.messageCount());
+    }
+
     private Result compact(WorkingMemory workingMemory, long estimatedTokensBefore) {
+        return compact(workingMemory, estimatedTokensBefore, "token_threshold");
+    }
+
+    private Result compact(WorkingMemory workingMemory, long estimatedTokensBefore, String reason) {
         List<Message> before = workingMemory.snapshot();
         if (before.isEmpty()) {
             return Result.notCompacted();
         }
-        // 保证压缩前的完整 L4 已写入 L5。
-        transcriptRecorder.recordUnpersisted(workingMemory);
-
         // auto 保留热消息和关键消息，其余冷数据写成摘要。
         List<Message> preserved = CompactionSupport.preservedMessages(before, policy.autoCompactHotMessages(), true);
         List<Message> cold = before.stream()
                 .filter(message -> !preserved.contains(message))
                 .toList();
+        if (cold.isEmpty()) {
+            return Result.notCompacted();
+        }
+
+        // 保证压缩前的完整 L4 已写入 L5。
+        transcriptRecorder.recordUnpersisted(workingMemory);
+
         String rawSummary = CompactionSupport.summarize(llmClient, cold);
         Message.User summaryMessage = new Message.User(CompactionSupport.summaryContent(rawSummary, transcriptRecorder.transcriptPath()));
         List<Message> after = new ArrayList<>();
@@ -78,7 +111,7 @@ public final class AutoCompactor {
                     transcriptRecorder.sessionId(),
                     new TranscriptRecord.CompactBoundary(
                             "auto",
-                            "token_threshold",
+                            reason,
                             estimatedTokensBefore,
                             policy.autoCompactHotMessages(),
                             0,
@@ -105,5 +138,25 @@ public final class AutoCompactor {
         public static Result notCompacted() {
             return new Result(false, null, 0);
         }
+    }
+
+    public record ForceResult(Status status, String reason, String boundaryUuid, int messageCount) {
+        public static ForceResult compacted(String boundaryUuid, int messageCount) {
+            return new ForceResult(Status.COMPACTED, "", boundaryUuid, messageCount);
+        }
+
+        public static ForceResult notNeeded() {
+            return new ForceResult(Status.NOT_NEEDED, "", null, 0);
+        }
+
+        public static ForceResult unavailable(String reason) {
+            return new ForceResult(Status.UNAVAILABLE, reason, null, 0);
+        }
+    }
+
+    public enum Status {
+        COMPACTED,
+        NOT_NEEDED,
+        UNAVAILABLE
     }
 }

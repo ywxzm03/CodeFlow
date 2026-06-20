@@ -26,7 +26,7 @@ class SlashCommandRegistryTest {
                 .map(SlashCommand::displayName)
                 .toList();
 
-        assertEquals(List.of("/clear", "/exit", "/help", "/model", "/permissions", "/resume"), matches);
+        assertEquals(List.of("/clear", "/compact", "/exit", "/help", "/model", "/permissions", "/resume"), matches);
     }
 
     @Test
@@ -58,7 +58,7 @@ class SlashCommandRegistryTest {
         reader.getBuffer().write("/");
         completer.complete(reader, null, candidates);
 
-        assertEquals(List.of("/clear", "/exit", "/help", "/model", "/permissions", "/resume"), candidateValues(candidates));
+        assertEquals(List.of("/clear", "/compact", "/exit", "/help", "/model", "/permissions", "/resume"), candidateValues(candidates));
     }
 
     @Test
@@ -72,6 +72,19 @@ class SlashCommandRegistryTest {
         completer.complete(reader, null, candidates);
 
         assertEquals(List.of("/model"), candidateValues(candidates));
+    }
+
+    @Test
+    void completerFiltersCompactCommandAsUserTypes() {
+        SlashCommandRegistry registry = registry();
+        SlashCommandCompleter completer = new SlashCommandCompleter(registry);
+        List<Candidate> candidates = new ArrayList<>();
+        var reader = LineReaderBuilder.builder().build();
+
+        reader.getBuffer().write("/co");
+        completer.complete(reader, null, candidates);
+
+        assertEquals(List.of("/compact"), candidateValues(candidates));
     }
 
     @Test
@@ -177,6 +190,7 @@ class SlashCommandRegistryTest {
                 new SlashCommand("permissions", "Select permission mode", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("resume", "Resume session", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("clear", "Clear working memory", (context, arguments) -> SlashCommand.Result.CONTINUE),
+                new SlashCommand("compact", "Compact working memory", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("exit", "Exit", (context, arguments) -> SlashCommand.Result.EXIT)
         ));
     }

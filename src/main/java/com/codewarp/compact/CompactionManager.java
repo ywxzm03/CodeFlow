@@ -35,6 +35,16 @@ public final class CompactionManager {
     }
 
     /**
+     * 手动触发 auto compact。
+     */
+    public AutoCompactor.ForceResult forceAutoCompact(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools) {
+        if (autoCompactor == null) {
+            return AutoCompactor.ForceResult.unavailable("auto compact is unavailable");
+        }
+        return autoCompactor.forceCompact(systemPrompt, workingMemory, tools);
+    }
+
+    /**
      * 上下文超限后触发兜底压缩。
      */
     public ReactiveResult reactiveCompact(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools, RuntimeException error, int retryCount) {

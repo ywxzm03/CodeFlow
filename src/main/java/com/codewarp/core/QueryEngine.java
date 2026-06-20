@@ -104,6 +104,37 @@ public class QueryEngine {
     }
 
     /**
+     * 手动压缩当前工作记忆。
+     */
+    public CompactResult compact(WorkingMemory workingMemory) {
+        if (workingMemory == null) {
+            throw new IllegalArgumentException("workingMemory must not be null");
+        }
+        if (workingMemory.size() == 0) {
+            return CompactResult.notNeeded();
+        }
+        if (compactionManager == null) {
+            return CompactResult.unavailable("compaction is unavailable");
+        }
+
+        int beforeMessages = workingMemory.size();
+        try {
+            com.codewarp.compact.AutoCompactor.ForceResult result = compactionManager.forceAutoCompact(
+                    systemPrompt(),
+                    workingMemory,
+                    tools
+            );
+            return switch (result.status()) {
+                case COMPACTED -> CompactResult.compacted(beforeMessages, workingMemory.size());
+                case NOT_NEEDED -> CompactResult.notNeeded();
+                case UNAVAILABLE -> CompactResult.unavailable(result.reason());
+            };
+        } catch (RuntimeException e) {
+            return CompactResult.failed(e.getMessage());
+        }
+    }
+
+    /**
      * 流式执行模式的迭代
      */
     private QueryResult executeStreamingIteration(WorkingMemory workingMemory, TurnState turnState, int iteration) {
@@ -252,5 +283,30 @@ public class QueryEngine {
     }
 
     private record TurnState(int originalStartIndex, Message.User userMessage) {
+    }
+
+    public record CompactResult(Status status, int beforeMessages, int afterMessages, String reason) {
+        public static CompactResult compacted(int beforeMessages, int afterMessages) {
+            return new CompactResult(Status.COMPACTED, beforeMessages, afterMessages, "");
+        }
+
+        public static CompactResult notNeeded() {
+            return new CompactResult(Status.NOT_NEEDED, 0, 0, "");
+        }
+
+        public static CompactResult unavailable(String reason) {
+            return new CompactResult(Status.UNAVAILABLE, 0, 0, reason);
+        }
+
+        public static CompactResult failed(String reason) {
+            return new CompactResult(Status.FAILED, 0, 0, reason);
+        }
+
+        public enum Status {
+            COMPACTED,
+            NOT_NEEDED,
+            UNAVAILABLE,
+            FAILED
+        }
     }
 }

@@ -59,6 +59,40 @@ class AutoCompactorTest {
         assertTrue(records.stream().anyMatch(TranscriptRecord::isCompactBoundary));
     }
 
+    @Test
+    void forceCompactIgnoresThreshold() throws Exception {
+        TranscriptStore store = initializedStore();
+        TranscriptRecorder recorder = new TranscriptRecorder(store, "session-a");
+        CompactionPolicy policy = new CompactionPolicy(true, 10_000, 8_000, 0.99, 1, 1);
+        AutoCompactor compactor = new AutoCompactor(policy, new TokenEstimator(), new StaticClient("manual summary"), recorder, store);
+        WorkingMemory memory = new WorkingMemory();
+        memory.append(new Message.User("old"));
+        memory.append(new Message.User("recent"));
+
+        AutoCompactor.ForceResult result = compactor.forceCompact("system", memory, List.of());
+
+        assertEquals(AutoCompactor.Status.COMPACTED, result.status());
+        assertEquals(2, memory.snapshot().size());
+        assertTrue(((Message.User) memory.snapshot().getFirst()).content().contains("manual summary"));
+        assertEquals(new Message.User("recent"), memory.snapshot().get(1));
+        List<TranscriptRecord> records = store.loadRecords("session-a");
+        assertTrue(records.stream().anyMatch(record ->
+                record.isCompactBoundary() && "manual_command".equals(record.compactBoundary().reason())
+        ));
+    }
+
+    @Test
+    void forceCompactSkipsEmptyColdMessages() throws Exception {
+        AutoCompactor compactor = compactor(new CompactionPolicy(true, 10_000, 8_000, 0.99, 5, 1), "summary");
+        WorkingMemory memory = new WorkingMemory();
+        memory.append(new Message.User("recent"));
+
+        AutoCompactor.ForceResult result = compactor.forceCompact("system", memory, List.of());
+
+        assertEquals(AutoCompactor.Status.NOT_NEEDED, result.status());
+        assertEquals(List.of(new Message.User("recent")), memory.snapshot());
+    }
+
     private AutoCompactor compactor(CompactionPolicy policy, String summary) throws Exception {
         TranscriptStore store = initializedStore();
         return new AutoCompactor(policy, new TokenEstimator(), new StaticClient(summary), new TranscriptRecorder(store, "session-a"), store);

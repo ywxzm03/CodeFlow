@@ -151,6 +151,70 @@ class QueryEngineWorkingMemoryTest {
         ));
     }
 
+    @Test
+    void compactReturnsNotNeededForEmptyWorkingMemory() {
+        QueryEngine queryEngine = queryEngine(
+                new RecordingStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("unused"))),
+                List.of(),
+                3
+        );
+
+        QueryEngine.CompactResult result = queryEngine.compact(new WorkingMemory());
+
+        assertEquals(QueryEngine.CompactResult.Status.NOT_NEEDED, result.status());
+    }
+
+    @Test
+    void compactReturnsUnavailableWhenCompactionManagerIsMissing() {
+        QueryEngine queryEngine = queryEngine(
+                new RecordingStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("unused"))),
+                List.of(),
+                3
+        );
+        WorkingMemory memory = new WorkingMemory();
+        memory.append(new Message.User("old"));
+
+        QueryEngine.CompactResult result = queryEngine.compact(memory);
+
+        assertEquals(QueryEngine.CompactResult.Status.UNAVAILABLE, result.status());
+    }
+
+    @Test
+    void compactForcesAutoCompaction() throws Exception {
+        TranscriptStore store = new TranscriptStore(tempDir.resolve("manual-memory/L5"));
+        store.initialize();
+        TranscriptRecorder recorder = new TranscriptRecorder(store, "session-a");
+        TokenEstimator estimator = new TokenEstimator();
+        CompactionPolicy policy = new CompactionPolicy(true, 10_000, 8_000, 0.99, 1, 1);
+        StaticSummaryClient client = new StaticSummaryClient("manual summary");
+        CompactionManager compactionManager = new CompactionManager(
+                new SnipCompactor(policy.snipToolResultThresholdChars(), estimator, recorder, store),
+                new AutoCompactor(policy, estimator, client, recorder, store),
+                new ReactiveCompactor(policy, estimator, client, recorder, store)
+        );
+        QueryEngine queryEngine = new QueryEngine(
+                client,
+                List.of(),
+                3,
+                ToolPermissionManager.askByDefault(),
+                null,
+                compactionManager
+        );
+        WorkingMemory memory = new WorkingMemory();
+        memory.append(new Message.User("old"));
+        memory.append(new Message.User("recent"));
+
+        QueryEngine.CompactResult result = queryEngine.compact(memory);
+
+        assertEquals(QueryEngine.CompactResult.Status.COMPACTED, result.status());
+        assertEquals(2, result.beforeMessages());
+        assertEquals(2, result.afterMessages());
+        assertTrue(((Message.User) memory.snapshot().getFirst()).content().contains("manual summary"));
+        assertTrue(store.loadRecords("session-a").stream().anyMatch(record ->
+                record.isCompactBoundary() && "manual_command".equals(record.compactBoundary().reason())
+        ));
+    }
+
     private Tool testTool() {
         return new Tool() {
             @Override
@@ -236,6 +300,28 @@ class QueryEngineWorkingMemoryTest {
                 return Flux.error(new RuntimeException("context length exceeded"));
             }
             return Flux.just(new StreamEvent.TextDelta("done"));
+        }
+
+        @Override
+        public void setModel(String model) {
+        }
+    }
+
+    private static final class StaticSummaryClient implements LLMClient {
+        private final String summary;
+
+        private StaticSummaryClient(String summary) {
+            this.summary = summary;
+        }
+
+        @Override
+        public LLMResponse call(String systemPrompt, List<Message> messages, List<Tool> tools) {
+            return new LLMResponse(summary, List.of(), null);
+        }
+
+        @Override
+        public Flux<StreamEvent> callStreaming(String systemPrompt, List<Message> messages, List<Tool> tools) {
+            throw new UnsupportedOperationException();
         }
 
         @Override
