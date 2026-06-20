@@ -35,10 +35,10 @@ class WorkingMemoryTest {
         memory.append(new Message.User("old"));
         int start = memory.size();
         memory.append(new Message.User("new"));
-        memory.append(new Message.Assistant("done", List.of()));
+        memory.append(new Message.Assistant("done", List.of(), null));
 
         assertEquals(
-                List.of(new Message.User("new"), new Message.Assistant("done", List.of())),
+                List.of(new Message.User("new"), new Message.Assistant("done", List.of(), null)),
                 memory.sliceFrom(start)
         );
     }
@@ -49,7 +49,7 @@ class WorkingMemoryTest {
         memory.append(new Message.User("old"));
         int start = memory.size();
         memory.append(new Message.User("new"));
-        memory.append(new Message.Assistant("done", List.of()));
+        memory.append(new Message.Assistant("done", List.of(), null));
 
         memory.rollbackTo(start);
 

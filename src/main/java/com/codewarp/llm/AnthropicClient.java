@@ -7,12 +7,15 @@ import com.anthropic.models.messages.ContentBlock;
 import com.anthropic.models.messages.ContentBlockParam;
 import com.anthropic.models.messages.InputJsonDelta;
 import com.anthropic.models.messages.Message;
+import com.anthropic.models.messages.MessageDeltaUsage;
 import com.anthropic.models.messages.MessageCreateParams;
 import com.anthropic.models.messages.MessageParam;
 import com.anthropic.models.messages.RawContentBlockDelta;
 import com.anthropic.models.messages.RawContentBlockDeltaEvent;
 import com.anthropic.models.messages.RawContentBlockStartEvent;
 import com.anthropic.models.messages.RawContentBlockStopEvent;
+import com.anthropic.models.messages.RawMessageDeltaEvent;
+import com.anthropic.models.messages.RawMessageStartEvent;
 import com.anthropic.models.messages.RawMessageStreamEvent;
 import com.anthropic.models.messages.TextBlockParam;
 import com.anthropic.models.messages.TextDelta;
@@ -78,7 +81,7 @@ public class AnthropicClient implements LLMClient {
             }
         }
 
-        return new LLMResponse(content.toString(), toolUses);
+        return new LLMResponse(content.toString(), toolUses, toUsage(response.usage()));
     }
 
     @Override
@@ -88,12 +91,13 @@ public class AnthropicClient implements LLMClient {
             StreamResponse<RawMessageStreamEvent> streamResponse = client.messages().createStreaming(params);
             // 按 content block 索引累积状态（文本块的类型、工具块的 id/name/分片参数）
             Map<Long, BlockAccumulator> contentBlocks = new LinkedHashMap<>();
+            UsageAccumulator usage = new UsageAccumulator();
             sink.onDispose(streamResponse::close);
 
             try {
                 // Reactor push 模式：过滤 raw event、累积 block 状态、可产出时直接 sink.next(...)。
                 // 不再需要 pending/fill，因为没有 Iterator.hasNext() 的预取语义。
-                streamResponse.stream().forEach(event -> processStreamEvent(event, contentBlocks, sink));
+                streamResponse.stream().forEach(event -> processStreamEvent(event, contentBlocks, usage, sink));
                 sink.complete();
             } catch (RuntimeException e) {
                 sink.error(e);
@@ -115,15 +119,48 @@ public class AnthropicClient implements LLMClient {
     private void processStreamEvent(
             RawMessageStreamEvent event,
             Map<Long, BlockAccumulator> contentBlocks,
+            UsageAccumulator usage,
             FluxSink<StreamEvent> sink
     ) {
-        if (event.isContentBlockStart()) {
+        if (event.isMessageStart()) {
+            handleMessageStart(event.asMessageStart(), usage, sink);
+        } else if (event.isMessageDelta()) {
+            handleMessageDelta(event.asMessageDelta(), usage, sink);
+        } else if (event.isContentBlockStart()) {
             handleContentBlockStart(event.asContentBlockStart(), contentBlocks, sink);
         } else if (event.isContentBlockDelta()) {
             handleContentBlockDelta(event.asContentBlockDelta(), contentBlocks, sink);
         } else if (event.isContentBlockStop()) {
             handleContentBlockStop(event.asContentBlockStop(), contentBlocks, sink);
         }
+    }
+
+    /**
+     * 消息开始：记录本次请求的输入 token 和初始输出 token。
+     */
+    private void handleMessageStart(
+            RawMessageStartEvent event,
+            UsageAccumulator usage,
+            FluxSink<StreamEvent> sink
+    ) {
+        usage.apply(event.message().usage());
+        emitUsage(usage, sink);
+    }
+
+    /**
+     * 消息增量：usage 是累计值，持续覆盖到最后一次 message_delta。
+     */
+    private void handleMessageDelta(
+            RawMessageDeltaEvent event,
+            UsageAccumulator usage,
+            FluxSink<StreamEvent> sink
+    ) {
+        usage.apply(event.usage());
+        emitUsage(usage, sink);
+    }
+
+    private void emitUsage(UsageAccumulator usage, FluxSink<StreamEvent> sink) {
+        sink.next(new StreamEvent.Usage(usage.toUsage()));
     }
 
     /**
@@ -361,6 +398,15 @@ public class AnthropicClient implements LLMClient {
         }
     }
 
+    private com.codewarp.core.Message.Usage toUsage(com.anthropic.models.messages.Usage usage) {
+        return new com.codewarp.core.Message.Usage(
+                usage.inputTokens(),
+                usage.outputTokens(),
+                usage.cacheCreationInputTokens().orElse(0L),
+                usage.cacheReadInputTokens().orElse(0L)
+        );
+    }
+
     /**
      * SDK builder 接收 API 根地址，不接 /v1/messages 完整路径。
      */
@@ -399,6 +445,39 @@ public class AnthropicClient implements LLMClient {
             this.type = type;
             this.id = id;
             this.name = name;
+        }
+    }
+
+    /**
+     * 流式 usage 聚合状态。
+     */
+    private static final class UsageAccumulator {
+        private long inputTokens;
+        private long outputTokens;
+        private long cacheCreationInputTokens;
+        private long cacheReadInputTokens;
+
+        void apply(com.anthropic.models.messages.Usage usage) {
+            inputTokens = usage.inputTokens();
+            outputTokens = usage.outputTokens();
+            cacheCreationInputTokens = usage.cacheCreationInputTokens().orElse(0L);
+            cacheReadInputTokens = usage.cacheReadInputTokens().orElse(0L);
+        }
+
+        void apply(MessageDeltaUsage usage) {
+            inputTokens = usage.inputTokens().orElse(inputTokens);
+            outputTokens = usage.outputTokens();
+            cacheCreationInputTokens = usage.cacheCreationInputTokens().orElse(cacheCreationInputTokens);
+            cacheReadInputTokens = usage.cacheReadInputTokens().orElse(cacheReadInputTokens);
+        }
+
+        com.codewarp.core.Message.Usage toUsage() {
+            return new com.codewarp.core.Message.Usage(
+                    inputTokens,
+                    outputTokens,
+                    cacheCreationInputTokens,
+                    cacheReadInputTokens
+            );
         }
     }
 }

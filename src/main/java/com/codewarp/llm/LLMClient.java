@@ -42,7 +42,7 @@ public interface LLMClient {
     /**
      * LLM响应
      */
-    record LLMResponse(String content, List<Message.ToolUse> toolUses) {
+    record LLMResponse(String content, List<Message.ToolUse> toolUses, Message.Usage usage) {
         public boolean hasToolUses() {
             return toolUses != null && !toolUses.isEmpty();
         }
@@ -61,5 +61,10 @@ public interface LLMClient {
          * 工具调用事件
          */
         record ToolUse(Message.ToolUse toolUse) implements StreamEvent {}
+
+        /**
+         * 本次响应的 token 用量事件。
+         */
+        record Usage(Message.Usage usage) implements StreamEvent {}
     }
 }

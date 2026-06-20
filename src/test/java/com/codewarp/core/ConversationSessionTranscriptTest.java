@@ -35,7 +35,7 @@ class ConversationSessionTranscriptTest {
         session.handleUserInput("hello");
 
         assertEquals(
-                List.of(new Message.User("hello"), new Message.Assistant("done", List.of())),
+                List.of(new Message.User("hello"), new Message.Assistant("done", List.of(), null)),
                 store.loadMessages("session-a")
         );
     }
@@ -74,7 +74,7 @@ class ConversationSessionTranscriptTest {
                 List.of(
                         new Message.User("old"),
                         new Message.User("new"),
-                        new Message.Assistant("done", List.of())
+                        new Message.Assistant("done", List.of(), null)
                 ),
                 store.loadMessages("old-session")
         );
@@ -82,7 +82,7 @@ class ConversationSessionTranscriptTest {
                 List.of(
                         new Message.User("old"),
                         new Message.User("new"),
-                        new Message.Assistant("done", List.of())
+                        new Message.Assistant("done", List.of(), null)
                 ),
                 session.workingMemory().snapshot()
         );

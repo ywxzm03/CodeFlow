@@ -35,7 +35,7 @@ class QueryEngineWorkingMemoryTest {
         assertEquals(
                 List.of(
                         new Message.User("hello"),
-                        new Message.Assistant("first", List.of()),
+                        new Message.Assistant("first", List.of(), null),
                         new Message.User("continue")
                 ),
                 client.calls.get(1)
@@ -56,7 +56,7 @@ class QueryEngineWorkingMemoryTest {
 
         assertEquals(QueryEngine.QueryResult.StopReason.COMPLETED, result.stopReason());
         assertEquals(
-                List.of(new Message.User("new"), new Message.Assistant("done", List.of())),
+                List.of(new Message.User("new"), new Message.Assistant("done", List.of(), null)),
                 result.turnMessages()
         );
         assertEquals(3, result.messages().size());

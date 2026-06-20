@@ -22,7 +22,7 @@ public sealed interface Message permits Message.User, Message.Assistant, Message
     /**
      * 助手消息
      */
-    record Assistant(String content, List<ToolUse> toolUses) implements Message {
+    record Assistant(String content, List<ToolUse> toolUses, Usage usage) implements Message {
         @Override
         public String role() {
             return "assistant";
@@ -37,6 +37,20 @@ public sealed interface Message permits Message.User, Message.Assistant, Message
      * 工具调用
      */
     record ToolUse(String id, String name, String input) {}
+
+    /**
+     * 模型返回的 token 用量。
+     */
+    record Usage(
+            long inputTokens,
+            long outputTokens,
+            long cacheCreationInputTokens,
+            long cacheReadInputTokens
+    ) {
+        public long totalTokens() {
+            return inputTokens + outputTokens + cacheCreationInputTokens + cacheReadInputTokens;
+        }
+    }
 
     /**
      * 工具结果消息

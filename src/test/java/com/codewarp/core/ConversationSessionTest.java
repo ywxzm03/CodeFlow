@@ -34,7 +34,7 @@ class ConversationSessionTest {
 
         assertEquals(QueryEngine.QueryResult.StopReason.COMPLETED, result.stopReason());
         assertEquals(
-                List.of(new Message.User("new"), new Message.Assistant("done", List.of())),
+                List.of(new Message.User("new"), new Message.Assistant("done", List.of(), null)),
                 reflected.get()
         );
     }

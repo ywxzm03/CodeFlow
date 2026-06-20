@@ -33,14 +33,14 @@ class TranscriptStoreTest {
 
         store.append("session-a", List.of(
                 new Message.User("hello"),
-                new Message.Assistant("done", List.of(new Message.ToolUse("toolu_1", "Read", "{}"))),
+                new Message.Assistant("done", List.of(new Message.ToolUse("toolu_1", "Read", "{}")), null),
                 new Message.ToolResult("toolu_1", "content", false)
         ));
 
         assertEquals(
                 List.of(
                         new Message.User("hello"),
-                        new Message.Assistant("done", List.of(new Message.ToolUse("toolu_1", "Read", "{}"))),
+                        new Message.Assistant("done", List.of(new Message.ToolUse("toolu_1", "Read", "{}")), null),
                         new Message.ToolResult("toolu_1", "content", false)
                 ),
                 store.loadMessages("session-a")

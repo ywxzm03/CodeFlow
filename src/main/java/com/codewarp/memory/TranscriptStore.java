@@ -230,6 +230,9 @@ public final class TranscriptStore {
             case Message.Assistant assistant -> {
                 node.put("role", "assistant");
                 node.set("content", assistantContentToJson(assistant));
+                if (assistant.usage() != null) {
+                    node.set("usage", usageToJson(assistant.usage()));
+                }
             }
             case Message.ToolResult toolResult -> {
                 node.put("role", "user");
@@ -265,6 +268,15 @@ public final class TranscriptStore {
             }
         }
         return content;
+    }
+
+    private ObjectNode usageToJson(Message.Usage usage) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("input_tokens", usage.inputTokens());
+        node.put("output_tokens", usage.outputTokens());
+        node.put("cache_creation_input_tokens", usage.cacheCreationInputTokens());
+        node.put("cache_read_input_tokens", usage.cacheReadInputTokens());
+        return node;
     }
 
     /**
@@ -339,7 +351,23 @@ public final class TranscriptStore {
                 ));
             }
         }
-        return new Message.Assistant(text.toString(), List.copyOf(toolUses));
+        return new Message.Assistant(text.toString(), List.copyOf(toolUses), parseUsage(node));
+    }
+
+    private Message.Usage parseUsage(JsonNode node) {
+        JsonNode usage = node.get("usage");
+        if (usage == null || usage.isNull()) {
+            return null;
+        }
+        if (!usage.isObject()) {
+            throw new IllegalArgumentException("assistant usage 必须是对象");
+        }
+        return new Message.Usage(
+                optionalLong(usage, "input_tokens"),
+                optionalLong(usage, "output_tokens"),
+                optionalLong(usage, "cache_creation_input_tokens"),
+                optionalLong(usage, "cache_read_input_tokens")
+        );
     }
 
     private JsonNode firstContentBlock(JsonNode node, String expectedType) {
@@ -436,5 +464,16 @@ public final class TranscriptStore {
             throw new IllegalArgumentException("transcript 字段必须是布尔值: " + field);
         }
         return value.asBoolean();
+    }
+
+    private static long optionalLong(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        if (value == null || value.isNull()) {
+            return 0;
+        }
+        if (!value.isNumber()) {
+            throw new IllegalArgumentException("transcript 字段必须是数字: " + field);
+        }
+        return value.asLong();
     }
 }

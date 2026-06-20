@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 查询引擎 - 实现"用户输入 → LLM调用 → 工具调用"的主循环
@@ -103,6 +104,7 @@ public class QueryEngine {
         try {
             StringBuilder contentBuilder = new StringBuilder();
             List<Message.ToolUse> allToolUses = new ArrayList<>();
+            AtomicReference<Message.Usage> usage = new AtomicReference<>();
 
 
             try {
@@ -116,6 +118,7 @@ public class QueryEngine {
                                     Console.info("  [入队] " + tu.name() + " (id: " + tu.id() + ")");
                                     executor.addTool(tu);
                                 }
+                                case LLMClient.StreamEvent.Usage usageEvent -> usage.set(usageEvent.usage());
                             }
                         })
                         .blockLast();
@@ -139,7 +142,7 @@ public class QueryEngine {
             }
 
             // 先添加 assistant 消息（含全部 tool_use），保证 tool result 跟在它之后
-            workingMemory.append(new Message.Assistant(content, allToolUses));
+            workingMemory.append(new Message.Assistant(content, allToolUses, usage.get()));
 
             // 没有工具调用 -> 对话结束
             if (allToolUses.isEmpty()) {

@@ -98,7 +98,7 @@ class MemoryReflectionTest {
         return new LLMClient() {
             @Override
             public LLMResponse call(String systemPrompt, List<Message> messages, List<Tool> tools) {
-                return new LLMResponse(response, List.of());
+                return new LLMResponse(response, List.of(), null);
             }
 
             @Override
