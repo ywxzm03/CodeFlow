@@ -27,10 +27,11 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Interactive terminal session with live slash command suggestions.
+ * 终端交互会话，负责输入循环和 slash 命令。
  */
 public final class TerminalSession implements AutoCloseable {
     static final String PROMPT = "\u001B[34mCodeWrap>\u001B[0m ";
@@ -42,8 +43,6 @@ public final class TerminalSession implements AutoCloseable {
     private final ConfigManager configManager;
     private final SlashCommandRegistry slashCommands;
     private final ToolPermissionManager toolPermissionManager;
-    private final MemoryReflection memoryReflection;
-    private final TranscriptRecorder transcriptRecorder;
     private final TranscriptStore transcriptStore;
     private final AtomicBoolean exitRequested = new AtomicBoolean(false);
     private Settings settings;
@@ -51,47 +50,6 @@ public final class TerminalSession implements AutoCloseable {
     private Terminal terminal;
     private SlashLineReader reader;
 
-    public TerminalSession(QueryEngine queryEngine, Settings settings) {
-        this(queryEngine, null, null, settings, SlashCommandRegistry.defaults(settings.resolvedModel()), null);
-    }
-
-    public TerminalSession(QueryEngine queryEngine, LLMClient llmClient, ConfigManager configManager, Settings settings) {
-        this(queryEngine, llmClient, configManager, settings, SlashCommandRegistry.defaults(settings.resolvedModel()), null);
-    }
-
-    public TerminalSession(
-            QueryEngine queryEngine,
-            LLMClient llmClient,
-            ConfigManager configManager,
-            Settings settings,
-            ToolPermissionManager toolPermissionManager
-    ) {
-        this(queryEngine, llmClient, configManager, settings, toolPermissionManager, null);
-    }
-
-    public TerminalSession(
-            QueryEngine queryEngine,
-            LLMClient llmClient,
-            ConfigManager configManager,
-            Settings settings,
-            ToolPermissionManager toolPermissionManager,
-            MemoryReflection memoryReflection
-    ) {
-        this(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, null);
-    }
-
-    public TerminalSession(
-            QueryEngine queryEngine,
-            LLMClient llmClient,
-            ConfigManager configManager,
-            Settings settings,
-            ToolPermissionManager toolPermissionManager,
-            MemoryReflection memoryReflection,
-            TranscriptRecorder transcriptRecorder
-    ) {
-        this(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, transcriptRecorder, null);
-    }
-
     public TerminalSession(
             QueryEngine queryEngine,
             LLMClient llmClient,
@@ -102,74 +60,21 @@ public final class TerminalSession implements AutoCloseable {
             TranscriptRecorder transcriptRecorder,
             TranscriptStore transcriptStore
     ) {
-        this(queryEngine, llmClient, configManager, settings, SlashCommandRegistry.defaults(settings.resolvedModel()), toolPermissionManager, memoryReflection, transcriptRecorder, transcriptStore);
-    }
-
-    TerminalSession(QueryEngine queryEngine, SlashCommandRegistry slashCommands) {
-        this(queryEngine, null, null, Settings.defaults(), slashCommands, null, null);
-    }
-
-    TerminalSession(
-            QueryEngine queryEngine,
-            LLMClient llmClient,
-            ConfigManager configManager,
-            Settings settings,
-            SlashCommandRegistry slashCommands,
-            ToolPermissionManager toolPermissionManager
-    ) {
-        this(queryEngine, llmClient, configManager, settings, slashCommands, toolPermissionManager, null);
-    }
-
-    TerminalSession(
-            QueryEngine queryEngine,
-            LLMClient llmClient,
-            ConfigManager configManager,
-            Settings settings,
-            SlashCommandRegistry slashCommands,
-            ToolPermissionManager toolPermissionManager,
-            MemoryReflection memoryReflection
-    ) {
-        this(queryEngine, llmClient, configManager, settings, slashCommands, toolPermissionManager, memoryReflection, null);
-    }
-
-    TerminalSession(
-            QueryEngine queryEngine,
-            LLMClient llmClient,
-            ConfigManager configManager,
-            Settings settings,
-            SlashCommandRegistry slashCommands,
-            ToolPermissionManager toolPermissionManager,
-            MemoryReflection memoryReflection,
-            TranscriptRecorder transcriptRecorder
-    ) {
-        this(queryEngine, llmClient, configManager, settings, slashCommands, toolPermissionManager, memoryReflection, transcriptRecorder, null);
-    }
-
-    TerminalSession(
-            QueryEngine queryEngine,
-            LLMClient llmClient,
-            ConfigManager configManager,
-            Settings settings,
-            SlashCommandRegistry slashCommands,
-            ToolPermissionManager toolPermissionManager,
-            MemoryReflection memoryReflection,
-            TranscriptRecorder transcriptRecorder,
-            TranscriptStore transcriptStore
-    ) {
-        this.transcriptRecorder = transcriptRecorder == null ? TranscriptRecorder.disabled() : transcriptRecorder;
-        this.conversationSession = new ConversationSession(queryEngine, memoryReflection, this.transcriptRecorder);
-        this.llmClient = llmClient;
-        this.configManager = configManager;
-        this.settings = settings;
-        this.slashCommands = slashCommands;
-        this.toolPermissionManager = toolPermissionManager;
-        this.memoryReflection = memoryReflection;
+        this.settings = Objects.requireNonNull(settings, "settings must not be null");
+        TranscriptRecorder activeTranscriptRecorder = Objects.requireNonNull(transcriptRecorder, "transcriptRecorder must not be null");
+        this.conversationSession = new ConversationSession(
+                Objects.requireNonNull(queryEngine, "queryEngine must not be null"),
+                memoryReflection,
+                activeTranscriptRecorder
+        );
+        this.llmClient = Objects.requireNonNull(llmClient, "llmClient must not be null");
+        this.configManager = Objects.requireNonNull(configManager, "configManager must not be null");
+        this.slashCommands = SlashCommandRegistry.defaults(this.settings.resolvedModel());
+        this.toolPermissionManager = Objects.requireNonNull(toolPermissionManager, "toolPermissionManager must not be null");
         this.transcriptStore = transcriptStore;
-        if (this.toolPermissionManager != null) {
-            this.toolPermissionManager.setConfirmer(this::confirmToolUse);
-        }
-        if (this.memoryReflection != null) {
-            this.memoryReflection.setConfirmer(this::confirmMemoryUpdate);
+        this.toolPermissionManager.setConfirmer(this::confirmToolUse);
+        if (memoryReflection != null) {
+            memoryReflection.setConfirmer(this::confirmMemoryUpdate);
         }
     }
 
@@ -390,12 +295,8 @@ public final class TerminalSession implements AutoCloseable {
 
     private void applyModelSelection(ModelOption option) throws IOException {
         settings = settings.withModel(option.key());
-        if (llmClient != null) {
-            llmClient.setModel(option.model());
-        }
-        if (configManager != null) {
-            configManager.save(settings);
-        }
+        llmClient.setModel(option.model());
+        configManager.save(settings);
     }
 
     private void handlePermissionsCommand() {
@@ -447,12 +348,8 @@ public final class TerminalSession implements AutoCloseable {
 
     private void applyPermissionModeSelection(PermissionModeOption option) throws IOException {
         settings = settings.withPermissionMode(option.mode());
-        if (toolPermissionManager != null) {
-            toolPermissionManager.setPermissionMode(option.mode());
-        }
-        if (configManager != null) {
-            configManager.save(settings);
-        }
+        toolPermissionManager.setPermissionMode(option.mode());
+        configManager.save(settings);
     }
 
     private void handleResumeCommand(String sessionIdArgument) {
