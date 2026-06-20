@@ -1,13 +1,13 @@
 package com.codewarp.core;
 
 import com.codewarp.permissions.ToolPermission;
-import com.codewarp.permissions.ToolPermissionConfig;
 import com.codewarp.permissions.ToolPermissionManager;
 import com.codewarp.tools.Tool;
 import com.codewarp.util.Console;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -31,17 +31,9 @@ public class StreamingToolExecutor {
     private volatile boolean hasErrored;
     private volatile boolean discarded;
 
-    public StreamingToolExecutor(List<Tool> toolDefinitions) {
-        this(toolDefinitions, ToolPermissionManager.askByDefault());
-    }
-
-    public StreamingToolExecutor(List<Tool> toolDefinitions, ToolPermissionConfig toolPermissionConfig) {
-        this(toolDefinitions, new ToolPermissionManager(toolPermissionConfig, null));
-    }
-
     public StreamingToolExecutor(List<Tool> toolDefinitions, ToolPermissionManager toolPermissionManager) {
-        this.toolDefinitions = toolDefinitions;
-        this.toolPermissionManager = toolPermissionManager == null ? ToolPermissionManager.askByDefault() : toolPermissionManager;
+        this.toolDefinitions = Objects.requireNonNull(toolDefinitions, "toolDefinitions must not be null");
+        this.toolPermissionManager = Objects.requireNonNull(toolPermissionManager, "toolPermissionManager must not be null");
         this.tools = new ArrayList<>();
         this.executorService = Executors.newCachedThreadPool();
         this.hasErrored = false;

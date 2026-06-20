@@ -2,6 +2,7 @@ package com.codewarp.tools;
 
 import com.codewarp.core.Message;
 import com.codewarp.core.StreamingToolExecutor;
+import com.codewarp.permissions.ToolPermissionManager;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -120,7 +121,7 @@ class ToolInputValidationTest {
                 return ValidationResult.invalid("bad input");
             }
         };
-        StreamingToolExecutor executor = new StreamingToolExecutor(List.of(tool));
+        StreamingToolExecutor executor = new StreamingToolExecutor(List.of(tool), ToolPermissionManager.askByDefault());
 
         executor.addTool(new Message.ToolUse("toolu_test", "TestTool", "{}"));
         List<StreamingToolExecutor.ToolResult> results = executor.getRemainingResults();

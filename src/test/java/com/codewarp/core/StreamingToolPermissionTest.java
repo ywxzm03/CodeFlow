@@ -21,7 +21,10 @@ class StreamingToolPermissionTest {
         AtomicBoolean executed = new AtomicBoolean(false);
         StreamingToolExecutor executor = new StreamingToolExecutor(
                 List.of(testTool(executed)),
-                new ToolPermissionConfig(Map.of("TestTool", ToolPermission.DENY))
+                new ToolPermissionManager(
+                        new ToolPermissionConfig(Map.of("TestTool", ToolPermission.DENY)),
+                        PermissionMode.ASK
+                )
         );
 
         executor.addTool(new Message.ToolUse("toolu_test", "TestTool", "{}"));
@@ -82,7 +85,10 @@ class StreamingToolPermissionTest {
         AtomicBoolean executed = new AtomicBoolean(false);
         StreamingToolExecutor executor = new StreamingToolExecutor(
                 List.of(testTool(executed)),
-                new ToolPermissionConfig(Map.of("TestTool", ToolPermission.ALLOW))
+                new ToolPermissionManager(
+                        new ToolPermissionConfig(Map.of("TestTool", ToolPermission.ALLOW)),
+                        PermissionMode.ASK
+                )
         );
 
         executor.addTool(new Message.ToolUse("toolu_test", "TestTool", "{}"));

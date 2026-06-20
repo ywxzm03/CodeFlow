@@ -2,7 +2,6 @@ package com.codewarp.core;
 
 import com.codewarp.llm.LLMClient;
 import com.codewarp.memory.MemoryContextProvider;
-import com.codewarp.permissions.ToolPermissionConfig;
 import com.codewarp.permissions.ToolPermissionManager;
 import com.codewarp.tools.Tool;
 import com.codewarp.util.Console;
@@ -11,6 +10,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 查询引擎 - 实现"用户输入 → LLM调用 → 工具调用"的主循环
@@ -39,18 +39,6 @@ public class QueryEngine {
     private final ToolPermissionManager toolPermissionManager;
     private final MemoryContextProvider memoryContextProvider;
 
-    public QueryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations) {
-        this(llmClient, tools, maxIterations, ToolPermissionManager.askByDefault());
-    }
-
-    public QueryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations, ToolPermissionConfig toolPermissionConfig) {
-        this(llmClient, tools, maxIterations, new ToolPermissionManager(toolPermissionConfig, null));
-    }
-
-    public QueryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations, ToolPermissionManager toolPermissionManager) {
-        this(llmClient, tools, maxIterations, toolPermissionManager, null);
-    }
-
     public QueryEngine(
             LLMClient llmClient,
             List<Tool> tools,
@@ -58,10 +46,10 @@ public class QueryEngine {
             ToolPermissionManager toolPermissionManager,
             MemoryContextProvider memoryContextProvider
     ) {
-        this.llmClient = llmClient;
-        this.tools = tools;
+        this.llmClient = Objects.requireNonNull(llmClient, "llmClient must not be null");
+        this.tools = Objects.requireNonNull(tools, "tools must not be null");
         this.maxIterations = maxIterations;
-        this.toolPermissionManager = toolPermissionManager == null ? ToolPermissionManager.askByDefault() : toolPermissionManager;
+        this.toolPermissionManager = Objects.requireNonNull(toolPermissionManager, "toolPermissionManager must not be null");
         this.memoryContextProvider = memoryContextProvider;
     }
 

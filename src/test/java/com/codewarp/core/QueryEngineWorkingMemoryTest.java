@@ -1,8 +1,10 @@
 package com.codewarp.core;
 
 import com.codewarp.llm.LLMClient;
+import com.codewarp.permissions.PermissionMode;
 import com.codewarp.permissions.ToolPermission;
 import com.codewarp.permissions.ToolPermissionConfig;
+import com.codewarp.permissions.ToolPermissionManager;
 import com.codewarp.tools.Tool;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
@@ -22,7 +24,7 @@ class QueryEngineWorkingMemoryTest {
                 Flux.just(new LLMClient.StreamEvent.TextDelta("first")),
                 Flux.just(new LLMClient.StreamEvent.TextDelta("second"))
         );
-        QueryEngine queryEngine = new QueryEngine(client, List.of(), 3);
+        QueryEngine queryEngine = queryEngine(client, List.of(), 3);
         WorkingMemory memory = new WorkingMemory();
 
         queryEngine.query("hello", memory);
@@ -42,7 +44,7 @@ class QueryEngineWorkingMemoryTest {
 
     @Test
     void completedQueryReturnsOnlyTurnMessages() {
-        QueryEngine queryEngine = new QueryEngine(
+        QueryEngine queryEngine = queryEngine(
                 new RecordingStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))),
                 List.of(),
                 3
@@ -66,7 +68,7 @@ class QueryEngineWorkingMemoryTest {
                 Flux.just(new LLMClient.StreamEvent.ToolUse(new Message.ToolUse("toolu_test", "TestTool", "{}"))),
                 Flux.just(new LLMClient.StreamEvent.TextDelta("final"))
         );
-        QueryEngine queryEngine = new QueryEngine(
+        QueryEngine queryEngine = queryEngine(
                 client,
                 List.of(testTool()),
                 3,
@@ -84,7 +86,7 @@ class QueryEngineWorkingMemoryTest {
 
     @Test
     void streamingErrorRollsBackCurrentTurn() {
-        QueryEngine queryEngine = new QueryEngine(
+        QueryEngine queryEngine = queryEngine(
                 new RecordingStreamingClient(Flux.error(new RuntimeException("boom"))),
                 List.of(),
                 3
@@ -121,6 +123,25 @@ class QueryEngineWorkingMemoryTest {
                 return ToolExecutionResult.success("tool result");
             }
         };
+    }
+
+    private QueryEngine queryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations) {
+        return new QueryEngine(llmClient, tools, maxIterations, ToolPermissionManager.askByDefault(), null);
+    }
+
+    private QueryEngine queryEngine(
+            LLMClient llmClient,
+            List<Tool> tools,
+            int maxIterations,
+            ToolPermissionConfig toolPermissionConfig
+    ) {
+        return new QueryEngine(
+                llmClient,
+                tools,
+                maxIterations,
+                new ToolPermissionManager(toolPermissionConfig, PermissionMode.ASK),
+                null
+        );
     }
 
     private static final class RecordingStreamingClient implements LLMClient {

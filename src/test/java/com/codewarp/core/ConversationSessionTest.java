@@ -3,6 +3,7 @@ package com.codewarp.core;
 import com.codewarp.llm.LLMClient;
 import com.codewarp.memory.MemoryReflection;
 import com.codewarp.memory.TranscriptRecorder;
+import com.codewarp.permissions.ToolPermissionManager;
 import com.codewarp.tools.Tool;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
@@ -20,7 +21,7 @@ class ConversationSessionTest {
     @Test
     void reflectsOnlyCompletedTurnMessages() {
         AtomicReference<List<Message>> reflected = new AtomicReference<>();
-        QueryEngine queryEngine = new QueryEngine(
+        QueryEngine queryEngine = queryEngine(
                 new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))),
                 List.of(),
                 3
@@ -41,7 +42,7 @@ class ConversationSessionTest {
     @Test
     void doesNotReflectErrorResults() {
         AtomicBoolean reflected = new AtomicBoolean(false);
-        QueryEngine queryEngine = new QueryEngine(
+        QueryEngine queryEngine = queryEngine(
                 new StaticStreamingClient(Flux.error(new RuntimeException("boom"))),
                 List.of(),
                 3
@@ -58,7 +59,7 @@ class ConversationSessionTest {
     @Test
     void doesNotReflectMaxIterationResults() {
         AtomicBoolean reflected = new AtomicBoolean(false);
-        QueryEngine queryEngine = new QueryEngine(new StaticStreamingClient(), List.of(), 0);
+        QueryEngine queryEngine = queryEngine(new StaticStreamingClient(), List.of(), 0);
         TestMemoryReflection memoryReflection = new TestMemoryReflection(messages -> reflected.set(true));
         ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled());
 
@@ -71,7 +72,7 @@ class ConversationSessionTest {
     @Test
     void clearEmptiesWorkingMemory() {
         ConversationSession session = new ConversationSession(
-                new QueryEngine(new StaticStreamingClient(), List.of(), 0),
+                queryEngine(new StaticStreamingClient(), List.of(), 0),
                 null,
                 TranscriptRecorder.disabled()
         );
@@ -80,6 +81,10 @@ class ConversationSessionTest {
         session.clear();
 
         assertEquals(0, session.workingMemory().size());
+    }
+
+    private QueryEngine queryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations) {
+        return new QueryEngine(llmClient, tools, maxIterations, ToolPermissionManager.askByDefault(), null);
     }
 
     private static final class StaticStreamingClient implements LLMClient {

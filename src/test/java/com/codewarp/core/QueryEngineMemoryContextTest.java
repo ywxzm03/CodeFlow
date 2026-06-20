@@ -3,6 +3,7 @@ package com.codewarp.core;
 import com.codewarp.llm.LLMClient;
 import com.codewarp.memory.MemoryContextProvider;
 import com.codewarp.memory.MemoryStore;
+import com.codewarp.permissions.ToolPermissionManager;
 import com.codewarp.tools.Tool;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -30,7 +31,7 @@ class QueryEngineMemoryContextTest {
                 llmClient,
                 List.of(),
                 1,
-                null,
+                ToolPermissionManager.askByDefault(),
                 new MemoryContextProvider(store)
         );
 

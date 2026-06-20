@@ -3,6 +3,7 @@ package com.codewarp.core;
 import com.codewarp.llm.LLMClient;
 import com.codewarp.memory.TranscriptRecorder;
 import com.codewarp.memory.TranscriptStore;
+import com.codewarp.permissions.ToolPermissionManager;
 import com.codewarp.tools.Tool;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -26,7 +27,7 @@ class ConversationSessionTranscriptTest {
         TranscriptStore store = initializedStore();
         TranscriptRecorder recorder = new TranscriptRecorder(store, "session-a");
         ConversationSession session = new ConversationSession(
-                new QueryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
+                queryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
                 null,
                 recorder
         );
@@ -44,7 +45,7 @@ class ConversationSessionTranscriptTest {
         TranscriptStore store = initializedStore();
         TranscriptRecorder recorder = new TranscriptRecorder(store, "session-a");
         ConversationSession session = new ConversationSession(
-                new QueryEngine(new StaticStreamingClient(Flux.error(new RuntimeException("boom"))), List.of(), 3),
+                queryEngine(new StaticStreamingClient(Flux.error(new RuntimeException("boom"))), List.of(), 3),
                 null,
                 recorder
         );
@@ -60,7 +61,7 @@ class ConversationSessionTranscriptTest {
         store.append("old-session", List.of(new Message.User("old")));
         TranscriptRecorder recorder = new TranscriptRecorder(store, "new-session");
         ConversationSession session = new ConversationSession(
-                new QueryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
+                queryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
                 null,
                 recorder
         );
@@ -94,7 +95,7 @@ class ConversationSessionTranscriptTest {
         TranscriptStore store = new TranscriptStore(transcriptRoot);
         TranscriptRecorder recorder = new TranscriptRecorder(store, "session-a");
         ConversationSession session = new ConversationSession(
-                new QueryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
+                queryEngine(new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done"))), List.of(), 3),
                 null,
                 recorder
         );
@@ -108,6 +109,10 @@ class ConversationSessionTranscriptTest {
         TranscriptStore store = new TranscriptStore(tempDir.resolve("memory/L5"));
         store.initialize();
         return store;
+    }
+
+    private QueryEngine queryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations) {
+        return new QueryEngine(llmClient, tools, maxIterations, ToolPermissionManager.askByDefault(), null);
     }
 
     private static final class StaticStreamingClient implements LLMClient {
