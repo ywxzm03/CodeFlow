@@ -205,6 +205,67 @@ class TranscriptStoreTest {
         assertEquals(new Message.User("hello"), messages.getFirst());
     }
 
+    @Test
+    void resumeFallsBackToOriginalWhenBoundaryLineIsTorn() throws Exception {
+        TranscriptStore store = initializedStore();
+        store.append("session-a", List.of(new Message.User("a"), new Message.User("b")));
+        // 模拟 boundary 写到一半被撕裂：半截坏 JSON。
+        Files.writeString(
+                tempDir.resolve("memory/L5/session-a.jsonl"),
+                "{\"uuid\":\"x\",\"type\":\"compact_boundary\",\"compact\":{\"mode\":\"auto\"",
+                java.nio.file.StandardOpenOption.APPEND
+        );
+
+        // 坏行被跳过 → 无有效 boundary → 回退到完整原文。
+        assertEquals(
+                List.of(new Message.User("a"), new Message.User("b")),
+                resumeMessages(store, "session-a")
+        );
+    }
+
+    @Test
+    void resumeAppliesSnipToPreservedReference() throws Exception {
+        TranscriptStore store = initializedStore();
+        List<String> uuids = store.append("session-a", List.of(
+                new Message.ToolResult("toolu_1", "full preserved content", false)
+        ));
+        String preservedUuid = uuids.getFirst();
+        // snip 元数据落在 boundary 之前（preserved 是更早的原文）。
+        store.appendSnipCompact("session-a", new TranscriptRecord.SnipCompact(
+                preservedUuid, "toolu_1", "tool_result_summary", 8, 22, 7, 2, "snipped"
+        ));
+        store.appendCompactBoundary("session-a", new TranscriptRecord.CompactBoundary(
+                "auto", "token_threshold", 160000, 5, 0,
+                "SUMMARY", List.of(preservedUuid),
+                tempDir.resolve("memory/L5/session-a.jsonl").toString()
+        ));
+
+        assertEquals(
+                List.of(
+                        new Message.User("SUMMARY"),
+                        new Message.ToolResult("toolu_1", "snipped", false)
+                ),
+                resumeMessages(store, "session-a")
+        );
+    }
+
+    @Test
+    void resumeSkipsPreservedWhoseOriginalLineIsTorn() throws Exception {
+        // 已知局限存档：被引用的 preserved 原文行若早先被撕裂，该条 resume 缺失，
+        // 但摘要与其余 preserved 不受影响。
+        TranscriptStore store = initializedStore();
+        Files.writeString(tempDir.resolve("memory/L5/session-a.jsonl"), """
+                {"uuid":"p1","parentUuid":null,"sessionId":"session-a","timestamp":"t","cwd":"/tmp","type":"user","message":{"role":"user","content":"kept"}}
+                {"uuid":"p2","parentUuid":"p1","sessionId":"session-a","timestamp":"t","cwd":"/tmp","type":"user","message":{"role":"user","content":"tor
+                {"uuid":"b","parentUuid":"p2","sessionId":"session-a","timestamp":"t","cwd":"/tmp","type":"compact_boundary","compact":{"mode":"auto","reason":"token_threshold","estimated_tokens_before":1,"hot_message_count":2,"retry_count":0,"summary":"S","preserved_uuids":["p1","p2"],"transcript_path":"/tmp/x"}}
+                """);
+
+        assertEquals(
+                List.of(new Message.User("S"), new Message.User("kept")),
+                resumeMessages(store, "session-a")
+        );
+    }
+
     private TranscriptStore initializedStore() throws Exception {
         TranscriptStore store = new TranscriptStore(tempDir.resolve("memory/L5"));
         store.initialize();

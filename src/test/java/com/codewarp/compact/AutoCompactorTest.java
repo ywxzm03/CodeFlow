@@ -93,6 +93,54 @@ class AutoCompactorTest {
         assertEquals(List.of(new Message.User("recent")), memory.snapshot());
     }
 
+    @Test
+    void compactedL4ResumesToSummaryPlusPreserved() throws Exception {
+        TranscriptStore store = initializedStore();
+        TranscriptRecorder recorder = new TranscriptRecorder(store, "session-a");
+        CompactionPolicy policy = new CompactionPolicy(true, 10, 8_000, 0.5, 2, 1);
+        AutoCompactor compactor = new AutoCompactor(policy, new TokenEstimator(), new StaticClient("cold summary"), recorder, store);
+        WorkingMemory memory = new WorkingMemory();
+        memory.append(new Message.User("cold one"));
+        memory.append(new Message.User("cold two"));
+        memory.append(new Message.Assistant("hot answer", List.of(), new Message.Usage(1, 1, 0, 0)));
+        memory.append(new Message.User("hot user"));
+
+        AutoCompactor.Result result = compactor.compactIfNeeded("system", memory, List.of(), 0);
+        assertTrue(result.compacted());
+
+        // 压缩后的 in-memory L4 应与 resume 重建出的 L4 完全一致。
+        List<Message> resumed = store.loadWorkingMemoryEntriesForResume("session-a").stream()
+                .map(WorkingMemory.Entry::message)
+                .toList();
+        assertEquals(memory.snapshot(), resumed);
+        assertEquals(3, resumed.size());
+        assertTrue(((Message.User) resumed.getFirst()).content().contains("cold summary"));
+        assertEquals(new Message.Assistant("hot answer", List.of(), new Message.Usage(1, 1, 0, 0)), resumed.get(1));
+        assertEquals(new Message.User("hot user"), resumed.get(2));
+    }
+
+    @Test
+    void compactionWritesSingleBoundaryAndNoAfterMessages() throws Exception {
+        TranscriptStore store = initializedStore();
+        TranscriptRecorder recorder = new TranscriptRecorder(store, "session-a");
+        CompactionPolicy policy = new CompactionPolicy(true, 10, 8_000, 0.99, 1, 1);
+        AutoCompactor compactor = new AutoCompactor(policy, new TokenEstimator(), new StaticClient("s"), recorder, store);
+        WorkingMemory memory = new WorkingMemory();
+        memory.append(new Message.User("cold"));
+        memory.append(new Message.User("hot"));
+
+        // 用 forceCompact 绕开 token 阈值，只验证落盘形状。
+        assertEquals(AutoCompactor.Status.COMPACTED, compactor.forceCompact("system", memory, List.of()).status());
+
+        List<TranscriptRecord> records = store.loadRecords("session-a");
+        long boundaries = records.stream().filter(TranscriptRecord::isCompactBoundary).count();
+        long messages = records.stream().filter(TranscriptRecord::isMessage).count();
+        // 仅 recordUnpersisted 写的 2 条原文 + 1 条 boundary；没有额外的 after 消息记录。
+        assertEquals(1, boundaries);
+        assertEquals(2, messages);
+        assertEquals(3, records.size());
+    }
+
     private AutoCompactor compactor(CompactionPolicy policy, String summary) throws Exception {
         TranscriptStore store = initializedStore();
         return new AutoCompactor(policy, new TokenEstimator(), new StaticClient(summary), new TranscriptRecorder(store, "session-a"), store);
