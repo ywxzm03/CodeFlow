@@ -82,28 +82,32 @@ class TranscriptStoreTest {
     }
 
     @Test
-    void loadMessagesForResumeStartsAfterLastCompactBoundary() throws Exception {
+    void loadMessagesForResumeRebuildsFromInlineBoundary() throws Exception {
         TranscriptStore store = initializedStore();
-        store.append("session-a", List.of(
+        List<String> uuids = store.append("session-a", List.of(
                 new Message.User("old"),
                 new Message.Assistant("old answer", List.of(), null)
         ));
+        // 新格式：摘要内联进 boundary，preserved 用已存在的 uuid 引用，不再单独写 after 消息。
         store.appendCompactBoundary("session-a", new TranscriptRecord.CompactBoundary(
                 "auto",
                 "token_threshold",
                 160000,
                 5,
                 0,
-                "summary-uuid",
+                "INLINE SUMMARY",
+                List.of(uuids.get(1)),
                 tempDir.resolve("memory/L5/session-a.jsonl").toString()
         ));
-        store.append("session-a", List.of(
-                new Message.User("summary"),
-                new Message.User("hot")
-        ));
+        // 压缩之后继续对话产生的新消息。
+        store.append("session-a", List.of(new Message.User("hot")));
 
         assertEquals(
-                List.of(new Message.User("summary"), new Message.User("hot")),
+                List.of(
+                        new Message.User("INLINE SUMMARY"),
+                        new Message.Assistant("old answer", List.of(), null),
+                        new Message.User("hot")
+                ),
                 resumeMessages(store, "session-a")
         );
     }
@@ -111,14 +115,15 @@ class TranscriptStoreTest {
     @Test
     void compactBoundaryDoesNotEnterMessageEntries() throws Exception {
         TranscriptStore store = initializedStore();
-        store.append("session-a", List.of(new Message.User("old")));
+        List<String> uuids = store.append("session-a", List.of(new Message.User("old")));
         store.appendCompactBoundary("session-a", new TranscriptRecord.CompactBoundary(
                 "reactive",
                 "context_overflow_error",
                 180000,
                 2,
                 1,
-                "summary-uuid",
+                "REACTIVE SUMMARY",
+                List.of(uuids.getFirst()),
                 tempDir.resolve("memory/L5/session-a.jsonl").toString()
         ));
 

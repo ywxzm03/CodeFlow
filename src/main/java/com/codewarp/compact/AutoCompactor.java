@@ -1,15 +1,11 @@
 package com.codewarp.compact;
 
-import com.codewarp.core.Message;
 import com.codewarp.core.WorkingMemory;
 import com.codewarp.llm.LLMClient;
-import com.codewarp.memory.TranscriptRecord;
 import com.codewarp.memory.TranscriptRecorder;
 import com.codewarp.memory.TranscriptStore;
 import com.codewarp.tools.Tool;
 
-import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -47,7 +43,7 @@ public final class AutoCompactor {
         if (estimatedTokens < policy.autoCompactThresholdTokens()) {
             return Result.notCompacted();
         }
-        return compact(workingMemory, estimatedTokens);
+        return compact(workingMemory, estimatedTokens, "token_threshold");
     }
 
     /**
@@ -69,74 +65,36 @@ public final class AutoCompactor {
 
         long estimatedTokens = tokenEstimator.estimate(systemPrompt, workingMemory.snapshot(), tools);
         Result result = compact(workingMemory, estimatedTokens, "manual_command");
+        if (result.ioFailed()) {
+            return ForceResult.unavailable("transcript 写入失败");
+        }
         if (!result.compacted()) {
             return ForceResult.notNeeded();
         }
         return ForceResult.compacted(result.boundaryUuid(), result.messageCount());
     }
 
-    private Result compact(WorkingMemory workingMemory, long estimatedTokensBefore) {
-        return compact(workingMemory, estimatedTokensBefore, "token_threshold");
-    }
-
     private Result compact(WorkingMemory workingMemory, long estimatedTokensBefore, String reason) {
-        List<Message> before = workingMemory.snapshot();
-        if (before.isEmpty()) {
-            return Result.notCompacted();
-        }
-        // auto 保留热消息和关键消息，其余冷数据写成摘要。
-        List<Message> preserved = CompactionSupport.preservedMessages(before, policy.autoCompactHotMessages(), true);
-        List<Message> cold = before.stream()
-                .filter(message -> !preserved.contains(message))
-                .toList();
-        if (cold.isEmpty()) {
-            return Result.notCompacted();
-        }
-
-        // 保证压缩前的完整 L4 已写入 L5。
-        transcriptRecorder.recordUnpersisted(workingMemory);
-
-        String rawSummary = CompactionSupport.summarize(llmClient, cold);
-        Message.User summaryMessage = new Message.User(CompactionSupport.summaryContent(rawSummary, transcriptRecorder.transcriptPath()));
-        List<Message> after = new ArrayList<>();
-        after.add(summaryMessage);
-        after.addAll(preserved);
-
-        List<WorkingMemory.Entry> originalEntries = workingMemory.snapshotEntries();
-        workingMemory.rollbackTo(0);
-        after.forEach(workingMemory::append);
-        try {
-            // boundary 之后的消息就是 resume 需要恢复的新 L4。
-            String boundaryUuid = transcriptStore.appendCompactBoundary(
-                    transcriptRecorder.sessionId(),
-                    new TranscriptRecord.CompactBoundary(
-                            "auto",
-                            reason,
-                            estimatedTokensBefore,
-                            policy.autoCompactHotMessages(),
-                            0,
-                            null,
-                            transcriptRecorder.transcriptPath()
-                    )
-            );
-            List<String> uuids = transcriptStore.append(transcriptRecorder.sessionId(), after);
-            for (int i = 0; i < uuids.size(); i++) {
-                workingMemory.markTranscriptUuid(i, uuids.get(i));
-            }
-            return new Result(true, boundaryUuid, after.size());
-        } catch (IOException | IllegalArgumentException e) {
-            workingMemory.restore(originalEntries);
-            throw new IllegalStateException("写入 auto compact transcript 失败: " + e.getMessage(), e);
-        }
+        // auto：保留关键消息 + 热消息；冷数据为空则不压缩。
+        CompactionSupport.CompactionOutcome outcome = CompactionSupport.applyCompaction(
+                workingMemory,
+                transcriptRecorder,
+                transcriptStore,
+                llmClient,
+                "auto",
+                reason,
+                estimatedTokensBefore,
+                policy.autoCompactHotMessages(),
+                0,
+                true,
+                true
+        );
+        return new Result(outcome.compacted(), outcome.boundaryUuid(), outcome.messageCount(), outcome.ioFailed());
     }
 
-    List<Message> preservedMessages(List<Message> messages, int hotMessageCount, boolean keepKeywordMessages) {
-        return CompactionSupport.preservedMessages(messages, hotMessageCount, keepKeywordMessages);
-    }
-
-    public record Result(boolean compacted, String boundaryUuid, int messageCount) {
+    public record Result(boolean compacted, String boundaryUuid, int messageCount, boolean ioFailed) {
         public static Result notCompacted() {
-            return new Result(false, null, 0);
+            return new Result(false, null, 0, false);
         }
     }
 

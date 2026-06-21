@@ -196,9 +196,27 @@ public final class TranscriptStore {
         }
 
         Collections.reverse(chain);
-        int startIndex = indexAfterLastCompactBoundary(chain);
+        // preserved 引用的原文及其 snip 都在 boundary 之前，按整链建立 snip 索引。
+        Map<String, TranscriptRecord.SnipCompact> snipsByTarget = snipsByTarget(chain, 0);
+
         List<WorkingMemory.Entry> entries = new ArrayList<>();
-        Map<String, TranscriptRecord.SnipCompact> snipsByTarget = snipsByTarget(chain, startIndex);
+        int boundaryIndex = lastCompactBoundaryIndex(chain);
+        int startIndex = 0;
+        if (boundaryIndex >= 0) {
+            TranscriptRecord boundaryRecord = chain.get(boundaryIndex);
+            TranscriptRecord.CompactBoundary boundary = boundaryRecord.compactBoundary();
+            // 1. 内联摘要
+            entries.add(new WorkingMemory.Entry(new Message.User(boundary.summary()), boundaryRecord.uuid()));
+            // 2. 引用的 preserved 原文（按 uuid 查，应用 snip）
+            for (String uuid : boundary.preservedUuids()) {
+                TranscriptRecord preserved = byUuid.get(uuid);
+                if (preserved != null && preserved.isMessage()) {
+                    entries.add(new WorkingMemory.Entry(applySnip(preserved, snipsByTarget.get(uuid)), uuid));
+                }
+            }
+            startIndex = boundaryIndex + 1;
+        }
+        // 3. boundary 之后压缩产生的新消息
         for (int i = startIndex; i < chain.size(); i++) {
             TranscriptRecord record = chain.get(i);
             if (record.isMessage()) {
@@ -229,14 +247,14 @@ public final class TranscriptStore {
         return new Message.ToolResult(toolResult.toolUseId(), snip.summary(), toolResult.isError());
     }
 
-    private int indexAfterLastCompactBoundary(List<TranscriptRecord> records) {
-        int startIndex = 0;
+    private int lastCompactBoundaryIndex(List<TranscriptRecord> records) {
+        int index = -1;
         for (int i = 0; i < records.size(); i++) {
             if (records.get(i).isCompactBoundary()) {
-                startIndex = i + 1;
+                index = i;
             }
         }
-        return startIndex;
+        return index;
     }
 
     /**
@@ -366,11 +384,14 @@ public final class TranscriptStore {
         node.put("estimated_tokens_before", boundary.estimatedTokensBefore());
         node.put("hot_message_count", boundary.hotMessageCount());
         node.put("retry_count", boundary.retryCount());
-        if (boundary.summaryMessageUuid() == null) {
-            node.putNull("summary_message_uuid");
-        } else {
-            node.put("summary_message_uuid", boundary.summaryMessageUuid());
+        node.put("summary", boundary.summary());
+        ArrayNode preserved = objectMapper.createArrayNode();
+        if (boundary.preservedUuids() != null) {
+            for (String uuid : boundary.preservedUuids()) {
+                preserved.add(uuid);
+            }
         }
+        node.set("preserved_uuids", preserved);
         node.put("transcript_path", boundary.transcriptPath());
         return node;
     }
@@ -512,9 +533,28 @@ public final class TranscriptStore {
                 optionalLong(node, "estimated_tokens_before"),
                 (int) optionalLong(node, "hot_message_count"),
                 (int) optionalLong(node, "retry_count"),
-                optionalText(node, "summary_message_uuid"),
+                requiredText(node, "summary"),
+                parseStringArray(node, "preserved_uuids"),
                 requiredText(node, "transcript_path")
         );
+    }
+
+    private static List<String> parseStringArray(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        if (value == null || value.isNull()) {
+            return List.of();
+        }
+        if (!value.isArray()) {
+            throw new IllegalArgumentException("transcript 字段必须是数组: " + field);
+        }
+        List<String> result = new ArrayList<>();
+        for (JsonNode element : value) {
+            if (!element.isTextual()) {
+                throw new IllegalArgumentException("transcript 数组元素必须是字符串: " + field);
+            }
+            result.add(element.asText());
+        }
+        return List.copyOf(result);
     }
 
     private TranscriptRecord.SnipCompact parseSnipCompact(JsonNode node) {

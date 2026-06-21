@@ -2,6 +2,8 @@ package com.codewarp.memory;
 
 import com.codewarp.core.Message;
 
+import java.util.List;
+
 /**
  * L5 jsonl 中的一条通用记录。
  */
@@ -30,6 +32,10 @@ public record TranscriptRecord(
 
     /**
      * L4 压缩边界。
+     *
+     * <p>摘要内容内联在 {@code summary} 中，被保留的热消息以 {@code preservedUuids}
+     * 引用 boundary 之前已存在的原文记录。整条 boundary 作为单条原子记录写入，
+     * 不再追加独立的 after 消息，从而消除「boundary 在、载荷不在」的中间态。
      */
     public record CompactBoundary(
             String mode,
@@ -37,7 +43,8 @@ public record TranscriptRecord(
             long estimatedTokensBefore,
             int hotMessageCount,
             int retryCount,
-            String summaryMessageUuid,
+            String summary,
+            List<String> preservedUuids,
             String transcriptPath
     ) {
     }
