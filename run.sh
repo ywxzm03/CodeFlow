@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# CodeWarp 启动脚本
+# CodeFlow 启动脚本
 
-CONFIG_FILE="$HOME/.codewarp/settings.json"
+CONFIG_FILE="$HOME/.codeflow/settings.json"
 JAVA_21_HOME="${JAVA_21_HOME:-}"
 
 if [ -z "$JAVA_21_HOME" ] && command -v /usr/libexec/java_home >/dev/null 2>&1; then
@@ -21,4 +21,4 @@ fi
 # 先安静生成启动脚本，再把当前进程替换成真实应用进程。
 # 这样终端交互不会被 Gradle 的进度输出和控制台托管干扰。
 ./gradlew --quiet installDist
-exec ./build/install/CodeWarp/bin/CodeWarp
+exec ./build/install/CodeFlow/bin/CodeFlow

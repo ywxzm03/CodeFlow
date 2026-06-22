@@ -3,7 +3,7 @@ plugins {
     id("application")
 }
 
-group = "com.codewarp"
+group = "com.codeflow"
 version = "1.0-SNAPSHOT"
 
 repositories {
@@ -39,7 +39,7 @@ java {
 }
 
 application {
-    mainClass.set("com.codewarp.app.CodeWarp")
+    mainClass.set("com.codeflow.app.CodeFlow")
 }
 
 tasks.test {
