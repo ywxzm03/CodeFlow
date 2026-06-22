@@ -4,6 +4,8 @@ import com.codewarp.compact.CompactionManager;
 import com.codewarp.llm.LLMClient;
 import com.codewarp.memory.MemoryContextProvider;
 import com.codewarp.permissions.ToolPermissionManager;
+import com.codewarp.skills.SkillStore;
+import com.codewarp.tools.SkillTool;
 import com.codewarp.tools.Tool;
 import com.codewarp.util.Console;
 
@@ -41,6 +43,7 @@ public class QueryEngine {
     private final ToolPermissionManager toolPermissionManager;
     private final MemoryContextProvider memoryContextProvider;
     private final CompactionManager compactionManager;
+    private final SkillStore skillStore;
 
     public QueryEngine(
             LLMClient llmClient,
@@ -50,12 +53,25 @@ public class QueryEngine {
             MemoryContextProvider memoryContextProvider,
             CompactionManager compactionManager
     ) {
+        this(llmClient, tools, maxIterations, toolPermissionManager, memoryContextProvider, compactionManager, null);
+    }
+
+    public QueryEngine(
+            LLMClient llmClient,
+            List<Tool> tools,
+            int maxIterations,
+            ToolPermissionManager toolPermissionManager,
+            MemoryContextProvider memoryContextProvider,
+            CompactionManager compactionManager,
+            SkillStore skillStore
+    ) {
         this.llmClient = Objects.requireNonNull(llmClient, "llmClient must not be null");
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
         this.maxIterations = maxIterations;
         this.toolPermissionManager = Objects.requireNonNull(toolPermissionManager, "toolPermissionManager must not be null");
         this.memoryContextProvider = memoryContextProvider;
         this.compactionManager = compactionManager;
+        this.skillStore = skillStore;
     }
 
     /**
@@ -98,9 +114,18 @@ public class QueryEngine {
     }
 
     private String systemPrompt() {
-        return memoryContextProvider == null
+        String prompt = memoryContextProvider == null
                 ? SYSTEM_PROMPT
                 : memoryContextProvider.buildSystemPrompt(SYSTEM_PROMPT);
+        if (skillStore == null) {
+            return prompt;
+        }
+
+        String skillIndex = skillStore.renderIndex();
+        if (skillIndex.isBlank()) {
+            return prompt;
+        }
+        return prompt + "\n\n### Skills\n" + skillIndex;
     }
 
     /**
@@ -234,6 +259,11 @@ public class QueryEngine {
                 StreamingToolExecutor.ToolResult result = resultsById.get(tu.id());
                 if (result != null) {
                     workingMemory.append(new Message.ToolResult(result.toolUseId(), result.content(), result.isError()));
+                    if (!result.isError() && SkillTool.TOOL_NAME.equals(result.toolName())) {
+                        findSkillTool()
+                                .flatMap(tool -> tool.renderInvocation(result.input(), "model"))
+                                .ifPresent(renderedSkill -> workingMemory.append(new Message.User(renderedSkill)));
+                    }
                 }
             }
 
@@ -263,6 +293,13 @@ public class QueryEngine {
             }
         }
         return Math.min(turnState.originalStartIndex(), messages.size());
+    }
+
+    private java.util.Optional<SkillTool> findSkillTool() {
+        return tools.stream()
+                .filter(SkillTool.class::isInstance)
+                .map(SkillTool.class::cast)
+                .findFirst();
     }
 
     /**

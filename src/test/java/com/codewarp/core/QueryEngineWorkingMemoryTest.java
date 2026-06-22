@@ -13,11 +13,15 @@ import com.codewarp.permissions.PermissionMode;
 import com.codewarp.permissions.ToolPermission;
 import com.codewarp.permissions.ToolPermissionConfig;
 import com.codewarp.permissions.ToolPermissionManager;
+import com.codewarp.skills.SkillRenderer;
+import com.codewarp.skills.SkillStore;
+import com.codewarp.tools.SkillTool;
 import com.codewarp.tools.Tool;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -95,6 +99,71 @@ class QueryEngineWorkingMemoryTest {
         assertTrue(memory.snapshot().stream().anyMatch(message ->
                 message instanceof Message.ToolResult toolResult && toolResult.content().contains("tool result")
         ));
+    }
+
+    @Test
+    void skillToolInvocationAppendsRenderedSkillMessage() throws Exception {
+        Path userSkills = tempDir.resolve("skills");
+        writeSkill(userSkills.resolve("commit"));
+        SkillStore skillStore = new SkillStore(userSkills, tempDir.resolve("project-skills"));
+        SkillTool skillTool = new SkillTool(skillStore, new SkillRenderer());
+        RecordingStreamingClient client = new RecordingStreamingClient(
+                Flux.just(new LLMClient.StreamEvent.ToolUse(new Message.ToolUse(
+                        "toolu_skill",
+                        "Skill",
+                        "{\"skill\":\"commit\",\"args\":\"add skills\"}"
+                ))),
+                Flux.just(new LLMClient.StreamEvent.TextDelta("done"))
+        );
+        QueryEngine queryEngine = new QueryEngine(
+                client,
+                List.of(skillTool),
+                3,
+                new ToolPermissionManager(new ToolPermissionConfig(Map.of("Skill", ToolPermission.ALLOW)), PermissionMode.ASK),
+                null,
+                null,
+                skillStore
+        );
+        WorkingMemory memory = new WorkingMemory();
+
+        QueryEngine.QueryResult result = queryEngine.query("write commit", memory);
+
+        assertEquals(QueryEngine.QueryResult.StopReason.COMPLETED, result.stopReason());
+        assertTrue(memory.snapshot().stream().anyMatch(message ->
+                message instanceof Message.ToolResult toolResult && toolResult.content().contains("Skill loaded: commit")
+        ));
+        assertTrue(memory.snapshot().stream().anyMatch(message ->
+                message instanceof Message.User user && user.content().contains("<skill_invocation>")
+                        && user.content().contains("<name>commit</name>")
+                        && user.content().contains("Use conventional commits.")
+        ));
+        assertEquals(2, client.calls.size());
+        assertTrue(client.calls.get(1).stream().anyMatch(message ->
+                message instanceof Message.User user && user.content().contains("<skill_invocation>")
+        ));
+    }
+
+    @Test
+    void systemPromptIncludesSkillIndex() throws Exception {
+        Path userSkills = tempDir.resolve("skills");
+        writeSkill(userSkills.resolve("commit"));
+        SkillStore skillStore = new SkillStore(userSkills, tempDir.resolve("project-skills"));
+        RecordingStreamingClient client = new RecordingStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("done")));
+        QueryEngine queryEngine = new QueryEngine(
+                client,
+                List.of(new SkillTool(skillStore, new SkillRenderer())),
+                1,
+                new ToolPermissionManager(new ToolPermissionConfig(Map.of("Skill", ToolPermission.ALLOW)), PermissionMode.ASK),
+                null,
+                null,
+                skillStore
+        );
+
+        queryEngine.query("hello", new WorkingMemory());
+
+        assertTrue(client.systemPrompts.getFirst().contains("### Skills"));
+        assertTrue(client.systemPrompts.getFirst().contains("- commit: Write commit message"));
+        assertTrue(client.systemPrompts.getFirst().contains("Use the Skill tool"));
     }
 
     @Test
@@ -239,6 +308,18 @@ class QueryEngineWorkingMemoryTest {
         };
     }
 
+    private void writeSkill(Path skillDir) throws Exception {
+        Files.createDirectories(skillDir);
+        Files.writeString(skillDir.resolve("SKILL.md"), """
+                ---
+                description: Write commit message
+                when_to_use: User asks for commit guidance
+                argument_hint: <change summary>
+                ---
+                Use conventional commits.
+                """);
+    }
+
     private QueryEngine queryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations) {
         return new QueryEngine(llmClient, tools, maxIterations, ToolPermissionManager.askByDefault(), null, null);
     }
@@ -262,6 +343,7 @@ class QueryEngineWorkingMemoryTest {
     private static final class RecordingStreamingClient implements LLMClient {
         private final List<Flux<StreamEvent>> responses;
         private final List<List<Message>> calls = new ArrayList<>();
+        private final List<String> systemPrompts = new ArrayList<>();
         private int responseIndex;
 
         @SafeVarargs
@@ -276,6 +358,7 @@ class QueryEngineWorkingMemoryTest {
 
         @Override
         public Flux<StreamEvent> callStreaming(String systemPrompt, List<Message> messages, List<Tool> tools) {
+            systemPrompts.add(systemPrompt);
             calls.add(List.copyOf(messages));
             return responses.get(Math.min(responseIndex++, responses.size() - 1));
         }

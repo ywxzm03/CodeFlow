@@ -18,6 +18,8 @@ import com.codewarp.memory.TranscriptRecorder;
 import com.codewarp.memory.TranscriptStore;
 import com.codewarp.permissions.ToolPermissionConfig;
 import com.codewarp.permissions.ToolPermissionManager;
+import com.codewarp.skills.SkillRenderer;
+import com.codewarp.skills.SkillStore;
 import com.codewarp.terminal.TerminalSession;
 import com.codewarp.tools.BashTool;
 import com.codewarp.tools.EditTool;
@@ -25,6 +27,7 @@ import com.codewarp.tools.GlobTool;
 import com.codewarp.tools.GrepTool;
 import com.codewarp.tools.MemoryReadTool;
 import com.codewarp.tools.ReadTool;
+import com.codewarp.tools.SkillTool;
 import com.codewarp.tools.Tool;
 import com.codewarp.tools.WriteTool;
 import com.codewarp.util.Console;
@@ -78,12 +81,15 @@ public class CodeWarp {
 
         // 注册基础工具。
         List<Tool> tools = new ArrayList<>();
+        SkillStore skillStore = new SkillStore();
+        SkillRenderer skillRenderer = new SkillRenderer();
         tools.add(new ReadTool());
         tools.add(new WriteTool());
         tools.add(new EditTool());
         tools.add(new BashTool());
         tools.add(new GrepTool());
         tools.add(new GlobTool());
+        tools.add(new SkillTool(skillStore, skillRenderer));
 
         // 初始化 L5 完整会话记录。
         TranscriptStore transcriptStore = null;
@@ -144,7 +150,8 @@ public class CodeWarp {
                 settings.maxIterations(),
                 toolPermissionManager,
                 memoryContextProvider,
-                compactionManager
+                compactionManager,
+                skillStore
         );
 
         // 启动终端交互

@@ -246,6 +246,8 @@ public class StreamingToolExecutor {
                 tool.status = ToolStatus.YIELDED;
                 results.add(new ToolResult(
                         tool.toolUseId,
+                        tool.toolName,
+                        tool.input,
                         tool.result.content(),
                         tool.result.isError()
                 ));
@@ -346,5 +348,5 @@ public class StreamingToolExecutor {
     /**
      * 工具执行结果。
      */
-    public record ToolResult(String toolUseId, String content, boolean isError) {}
+    public record ToolResult(String toolUseId, String toolName, String input, String content, boolean isError) {}
 }

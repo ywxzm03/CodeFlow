@@ -101,7 +101,8 @@ public class ConfigManager {
                     "Bash": "ask",
                     "Grep": "ask",
                     "Glob": "ask",
-                    "MemoryRead": "ask"
+                    "MemoryRead": "ask",
+                    "Skill": "ask"
                   },
                   "compaction": {
                     "enabled": true,

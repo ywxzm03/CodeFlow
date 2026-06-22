@@ -158,6 +158,7 @@ public record Settings(
         permissions.put("Grep", ToolPermission.ASK);
         permissions.put("Glob", ToolPermission.ASK);
         permissions.put("MemoryRead", ToolPermission.ASK);
+        permissions.put("Skill", ToolPermission.ASK);
         return permissions;
     }
 
