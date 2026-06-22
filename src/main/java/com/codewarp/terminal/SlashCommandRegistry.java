@@ -1,23 +1,33 @@
 package com.codewarp.terminal;
 
+import com.codewarp.skills.SkillDefinition;
+import com.codewarp.skills.SkillStore;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Registry and matcher for local slash commands.
  */
 public final class SlashCommandRegistry {
     private final List<SlashCommand> commands;
+    private final Supplier<List<SkillDefinition>> skillsSupplier;
 
     public SlashCommandRegistry(List<SlashCommand> commands) {
+        this(commands, List::of);
+    }
+
+    public SlashCommandRegistry(List<SlashCommand> commands, Supplier<List<SkillDefinition>> skillsSupplier) {
         this.commands = commands.stream()
                 .sorted(Comparator.comparing(SlashCommand::name))
                 .toList();
+        this.skillsSupplier = skillsSupplier == null ? List::of : skillsSupplier;
     }
 
-    public static SlashCommandRegistry defaults(String modelName) {
+    public static SlashCommandRegistry defaults(String modelName, SkillStore skillStore) {
         List<SlashCommand> commands = new ArrayList<>();
         commands.add(new SlashCommand("clear", "Clear working memory and terminal screen", (context, arguments) -> SlashCommand.Result.CONTINUE));
         commands.add(new SlashCommand("compact", "Compact working memory", (context, arguments) -> SlashCommand.Result.CONTINUE));
@@ -35,11 +45,11 @@ public final class SlashCommandRegistry {
         }));
         commands.add(new SlashCommand("permissions", "Select permission mode", (context, arguments) -> SlashCommand.Result.CONTINUE));
         commands.add(new SlashCommand("resume", "Resume a transcript session", (context, arguments) -> SlashCommand.Result.CONTINUE));
-        return new SlashCommandRegistry(commands);
+        return new SlashCommandRegistry(commands, skillStore == null ? List::of : skillStore::list);
     }
 
     public List<SlashCommand> commands() {
-        return commands;
+        return mergedCommands();
     }
 
     public List<SlashCommand> match(String input) {
@@ -48,7 +58,7 @@ public final class SlashCommandRegistry {
         }
 
         String commandPrefix = commandPrefix(input);
-        return commands.stream()
+        return mergedCommands().stream()
                 .filter(command -> command.name().startsWith(commandPrefix))
                 .toList();
     }
@@ -76,6 +86,35 @@ public final class SlashCommandRegistry {
 
     private static String commandName(String input) {
         return commandPrefix(input.trim());
+    }
+
+    private List<SlashCommand> mergedCommands() {
+        List<SlashCommand> merged = new ArrayList<>(commands);
+        for (SkillDefinition skill : skillsSupplier.get()) {
+            if (isBuiltInCommandName(skill.name())) {
+                continue;
+            }
+            merged.add(new SlashCommand(
+                    skill.name(),
+                    skillDescription(skill),
+                    (context, arguments) -> SlashCommand.Result.CONTINUE
+            ));
+        }
+        return merged.stream()
+                .sorted(Comparator.comparing(SlashCommand::name))
+                .toList();
+    }
+
+    private boolean isBuiltInCommandName(String name) {
+        return commands.stream().anyMatch(command -> command.name().equals(name));
+    }
+
+    private static String skillDescription(SkillDefinition skill) {
+        StringBuilder builder = new StringBuilder(skill.description());
+        if (skill.argumentHint() != null && !skill.argumentHint().isBlank()) {
+            builder.append(" ").append(skill.argumentHint());
+        }
+        return builder.toString();
     }
 
     private static String formatHelp(List<SlashCommand> commands) {

@@ -1,12 +1,24 @@
 package com.codewarp.terminal;
 
 import com.codewarp.config.Settings;
+import com.codewarp.llm.LLMClient;
 import com.codewarp.memory.TranscriptSession;
+import com.codewarp.memory.TranscriptRecorder;
 import com.codewarp.permissions.PermissionMode;
+import com.codewarp.permissions.ToolPermissionManager;
+import com.codewarp.skills.SkillRenderer;
+import com.codewarp.skills.SkillStore;
+import com.codewarp.core.QueryEngine;
+import com.codewarp.core.Message;
+import com.codewarp.tools.Tool;
 import org.jline.reader.Candidate;
 import org.jline.reader.LineReaderBuilder;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import reactor.core.publisher.Flux;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,6 +29,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SlashCommandRegistryTest {
+
+    @TempDir
+    Path tempDir;
 
     @Test
     void slashMatchesAllCommands() {
@@ -114,6 +129,75 @@ class SlashCommandRegistryTest {
     }
 
     @Test
+    void slashRegistryIncludesSkills() throws Exception {
+        writeSkill(tempDir.resolve("skills/commit"));
+        SlashCommandRegistry registry = new SlashCommandRegistry(List.of(
+                new SlashCommand("help", "Show help", (context, arguments) -> SlashCommand.Result.CONTINUE)
+        ), new SkillStore(tempDir.resolve("skills"), tempDir.resolve("project"))::list);
+
+        List<String> matches = registry.match("/").stream()
+                .map(SlashCommand::displayName)
+                .toList();
+
+        assertEquals(List.of("/commit", "/help"), matches);
+    }
+
+    @Test
+    void slashRegistryDoesNotLetSkillOverrideBuiltInCommand() throws Exception {
+        writeSkill(tempDir.resolve("skills/help"));
+        SlashCommandRegistry registry = new SlashCommandRegistry(List.of(
+                new SlashCommand("help", "Show help", (context, arguments) -> SlashCommand.Result.CONTINUE)
+        ), new SkillStore(tempDir.resolve("skills"), tempDir.resolve("project"))::list);
+
+        List<SlashCommand> commands = registry.commands();
+
+        assertEquals(1, commands.size());
+        assertEquals("/help", commands.getFirst().displayName());
+        assertEquals("Show help", commands.getFirst().description());
+    }
+
+    @Test
+    void completerListsSkillCommandsForSlashInput() throws Exception {
+        writeSkill(tempDir.resolve("skills/commit"));
+        SlashCommandRegistry registry = new SlashCommandRegistry(List.of(
+                new SlashCommand("help", "Show help", (context, arguments) -> SlashCommand.Result.CONTINUE)
+        ), new SkillStore(tempDir.resolve("skills"), tempDir.resolve("project"))::list);
+        SlashCommandCompleter completer = new SlashCommandCompleter(registry);
+        List<Candidate> candidates = new ArrayList<>();
+        var reader = LineReaderBuilder.builder().build();
+
+        reader.getBuffer().write("/co");
+        completer.complete(reader, null, candidates);
+
+        assertEquals(List.of("/commit"), candidateValues(candidates));
+    }
+
+    @Test
+    void terminalRendersSkillSlashInput() throws Exception {
+        writeSkill(tempDir.resolve("skills/commit"));
+        SkillStore skillStore = new SkillStore(tempDir.resolve("skills"), tempDir.resolve("project"));
+        TerminalSession session = new TerminalSession(
+                new QueryEngine(new StaticStreamingClient(), List.of(), 1, ToolPermissionManager.askByDefault(), null, null),
+                new StaticStreamingClient(),
+                new com.codewarp.config.ConfigManager(),
+                new Settings("key", "url", "A", Settings.defaults().resolvedModels(), 1000, 1, PermissionMode.ASK, Map.of(), Settings.Compaction.defaults()),
+                ToolPermissionManager.askByDefault(),
+                null,
+                TranscriptRecorder.disabled(),
+                null,
+                skillStore,
+                new SkillRenderer()
+        );
+
+        String rendered = session.renderSkillCommandInput("/commit add skills").orElseThrow();
+
+        assertTrue(rendered.contains("<skill_invocation>"));
+        assertTrue(rendered.contains("<name>commit</name>"));
+        assertTrue(rendered.contains("<args>add skills</args>"));
+        assertTrue(rendered.contains("<source>user</source>"));
+    }
+
+    @Test
     void completerIgnoresNonSlashInput() {
         SlashCommandRegistry registry = registry();
         SlashCommandCompleter completer = new SlashCommandCompleter(registry);
@@ -199,5 +283,32 @@ class SlashCommandRegistryTest {
         return candidates.stream()
                 .map(Candidate::value)
                 .toList();
+    }
+
+    private void writeSkill(Path skillDir) throws Exception {
+        Files.createDirectories(skillDir);
+        Files.writeString(skillDir.resolve("SKILL.md"), """
+                ---
+                description: Write commit message
+                argument_hint: <change summary>
+                ---
+                Use conventional commits.
+                """);
+    }
+
+    private static final class StaticStreamingClient implements LLMClient {
+        @Override
+        public LLMResponse call(String systemPrompt, List<Message> messages, List<Tool> tools) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Flux<StreamEvent> callStreaming(String systemPrompt, List<Message> messages, List<Tool> tools) {
+            return Flux.just(new StreamEvent.TextDelta("done"));
+        }
+
+        @Override
+        public void setModel(String model) {
+        }
     }
 }

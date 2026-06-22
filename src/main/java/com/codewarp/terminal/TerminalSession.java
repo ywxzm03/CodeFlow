@@ -13,6 +13,9 @@ import com.codewarp.memory.TranscriptSession;
 import com.codewarp.memory.TranscriptStore;
 import com.codewarp.permissions.PermissionMode;
 import com.codewarp.permissions.ToolPermissionManager;
+import com.codewarp.skills.SkillDefinition;
+import com.codewarp.skills.SkillRenderer;
+import com.codewarp.skills.SkillStore;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.UserInterruptException;
@@ -44,6 +47,8 @@ public final class TerminalSession implements AutoCloseable {
     private final SlashCommandRegistry slashCommands;
     private final ToolPermissionManager toolPermissionManager;
     private final TranscriptStore transcriptStore;
+    private final SkillStore skillStore;
+    private final SkillRenderer skillRenderer;
     private final AtomicBoolean exitRequested = new AtomicBoolean(false);
     private Settings settings;
 
@@ -58,7 +63,9 @@ public final class TerminalSession implements AutoCloseable {
             ToolPermissionManager toolPermissionManager,
             MemoryReflection memoryReflection,
             TranscriptRecorder transcriptRecorder,
-            TranscriptStore transcriptStore
+            TranscriptStore transcriptStore,
+            SkillStore skillStore,
+            SkillRenderer skillRenderer
     ) {
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         TranscriptRecorder activeTranscriptRecorder = Objects.requireNonNull(transcriptRecorder, "transcriptRecorder must not be null");
@@ -69,7 +76,9 @@ public final class TerminalSession implements AutoCloseable {
         );
         this.llmClient = Objects.requireNonNull(llmClient, "llmClient must not be null");
         this.configManager = Objects.requireNonNull(configManager, "configManager must not be null");
-        this.slashCommands = SlashCommandRegistry.defaults(this.settings.resolvedModel());
+        this.skillStore = skillStore;
+        this.skillRenderer = skillRenderer;
+        this.slashCommands = SlashCommandRegistry.defaults(this.settings.resolvedModel(), skillStore);
         this.toolPermissionManager = Objects.requireNonNull(toolPermissionManager, "toolPermissionManager must not be null");
         this.transcriptStore = transcriptStore;
         this.toolPermissionManager.setConfirmer(this::confirmToolUse);
@@ -204,6 +213,11 @@ public final class TerminalSession implements AutoCloseable {
             return;
         }
 
+        if ("/help".equals(input) || input.startsWith("/help ")) {
+            printSlashCommandList(slashCommands.commands());
+            return;
+        }
+
         if ("/model".equals(input)) {
             handleModelCommand();
             return;
@@ -226,6 +240,9 @@ public final class TerminalSession implements AutoCloseable {
                 exitRequested.set(true);
             }
         }, () -> {
+            if (handleSkillCommand(input)) {
+                return;
+            }
             var matches = slashCommands.match(input);
             if (!matches.isEmpty()) {
                 printSlashCommandList(matches);
@@ -235,6 +252,39 @@ public final class TerminalSession implements AutoCloseable {
             terminal.writer().println("Type / to see available commands.");
             terminal.writer().flush();
         });
+    }
+
+    private boolean handleSkillCommand(String input) {
+        java.util.Optional<String> renderedSkill = renderSkillCommandInput(input);
+        if (renderedSkill.isEmpty()) {
+            return false;
+        }
+
+        try {
+            QueryEngine.QueryResult result = conversationSession.handleUserInput(renderedSkill.get());
+            terminal.writer().println(result.finalResponse());
+            terminal.writer().flush();
+        } catch (Exception e) {
+            terminal.writer().println();
+            terminal.writer().println("Error: " + e.getMessage());
+            e.printStackTrace(terminal.writer());
+            terminal.writer().flush();
+        }
+        return true;
+    }
+
+    java.util.Optional<String> renderSkillCommandInput(String input) {
+        if (skillStore == null || skillRenderer == null) {
+            return java.util.Optional.empty();
+        }
+
+        String commandName = slashCommandName(input);
+        java.util.Optional<SkillDefinition> skill = skillStore.find(commandName);
+        if (skill.isEmpty()) {
+            return java.util.Optional.empty();
+        }
+
+        return java.util.Optional.of(skillRenderer.render(skill.get(), slashArguments(input), "user"));
     }
 
     private void handleClearCommand() {
@@ -644,6 +694,15 @@ public final class TerminalSession implements AutoCloseable {
         String trimmed = input.trim();
         int spaceIndex = trimmed.indexOf(' ');
         return spaceIndex >= 0 ? trimmed.substring(spaceIndex + 1).trim() : "";
+    }
+
+    private String slashCommandName(String input) {
+        String trimmed = input.trim();
+        if (trimmed.startsWith("/")) {
+            trimmed = trimmed.substring(1);
+        }
+        int spaceIndex = trimmed.indexOf(' ');
+        return spaceIndex >= 0 ? trimmed.substring(0, spaceIndex) : trimmed;
     }
 
     private void printSlashCommandList(java.util.List<SlashCommand> commands) {
