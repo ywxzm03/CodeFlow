@@ -1,14 +1,12 @@
 package com.codeflow.core;
 
+import com.codeflow.hooks.PreToolUseResult;
 import com.codeflow.permissions.PermissionMode;
-import com.codeflow.permissions.ToolPermission;
-import com.codeflow.permissions.ToolPermissionConfig;
 import com.codeflow.permissions.ToolPermissionManager;
 import com.codeflow.tools.Tool;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -17,14 +15,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class StreamingToolPermissionTest {
 
     @Test
-    void deniedToolDoesNotExecute() {
+    void preToolUseDeniedToolDoesNotExecute() {
         AtomicBoolean executed = new AtomicBoolean(false);
         StreamingToolExecutor executor = new StreamingToolExecutor(
                 List.of(testTool(executed)),
-                new ToolPermissionManager(
-                        new ToolPermissionConfig(Map.of("TestTool", ToolPermission.DENY)),
-                        PermissionMode.ASK
-                )
+                new ToolPermissionManager(PermissionMode.FULL_ACCESS),
+                input -> PreToolUseResult.deny("blocked")
         );
 
         executor.addTool(new Message.ToolUse("toolu_test", "TestTool", "{}"));
@@ -37,12 +33,9 @@ class StreamingToolPermissionTest {
     }
 
     @Test
-    void askToolExecutesWhenUserConfirms() {
+    void defaultAskToolExecutesWhenUserConfirms() {
         AtomicBoolean executed = new AtomicBoolean(false);
-        ToolPermissionManager permissionManager = new ToolPermissionManager(
-                new ToolPermissionConfig(Map.of("TestTool", ToolPermission.ASK)),
-                PermissionMode.ASK
-        );
+        ToolPermissionManager permissionManager = new ToolPermissionManager(PermissionMode.ASK);
         permissionManager.setConfirmer((toolName, input) -> true);
         StreamingToolExecutor executor = new StreamingToolExecutor(
                 List.of(testTool(executed)),
@@ -59,12 +52,9 @@ class StreamingToolPermissionTest {
     }
 
     @Test
-    void askToolDoesNotExecuteWhenUserRejects() {
+    void defaultAskToolDoesNotExecuteWhenUserRejects() {
         AtomicBoolean executed = new AtomicBoolean(false);
-        ToolPermissionManager permissionManager = new ToolPermissionManager(
-                new ToolPermissionConfig(Map.of("TestTool", ToolPermission.ASK)),
-                PermissionMode.ASK
-        );
+        ToolPermissionManager permissionManager = new ToolPermissionManager(PermissionMode.ASK);
         permissionManager.setConfirmer((toolName, input) -> false);
         StreamingToolExecutor executor = new StreamingToolExecutor(
                 List.of(testTool(executed)),
@@ -81,14 +71,18 @@ class StreamingToolPermissionTest {
     }
 
     @Test
-    void allowedToolExecutes() {
+    void preToolUseAllowedToolExecutesWithoutConfirmation() {
         AtomicBoolean executed = new AtomicBoolean(false);
+        AtomicBoolean asked = new AtomicBoolean(false);
+        ToolPermissionManager permissionManager = new ToolPermissionManager(PermissionMode.ASK);
+        permissionManager.setConfirmer((toolName, input) -> {
+            asked.set(true);
+            return false;
+        });
         StreamingToolExecutor executor = new StreamingToolExecutor(
                 List.of(testTool(executed)),
-                new ToolPermissionManager(
-                        new ToolPermissionConfig(Map.of("TestTool", ToolPermission.ALLOW)),
-                        PermissionMode.ASK
-                )
+                permissionManager,
+                input -> PreToolUseResult.allow("allowed")
         );
 
         executor.addTool(new Message.ToolUse("toolu_test", "TestTool", "{}"));
@@ -96,6 +90,7 @@ class StreamingToolPermissionTest {
         executor.shutdown();
 
         assertTrue(executed.get());
+        assertFalse(asked.get());
         assertFalse(results.getFirst().isError());
         assertTrue(results.getFirst().content().contains("executed"));
     }
@@ -104,10 +99,7 @@ class StreamingToolPermissionTest {
     void fullAccessAllowsAskToolWithoutConfirmation() {
         AtomicBoolean executed = new AtomicBoolean(false);
         AtomicBoolean asked = new AtomicBoolean(false);
-        ToolPermissionManager permissionManager = new ToolPermissionManager(
-                new ToolPermissionConfig(Map.of("TestTool", ToolPermission.ASK)),
-                PermissionMode.FULL_ACCESS
-        );
+        ToolPermissionManager permissionManager = new ToolPermissionManager(PermissionMode.FULL_ACCESS);
         permissionManager.setConfirmer((toolName, input) -> {
             asked.set(true);
             return false;
@@ -128,15 +120,18 @@ class StreamingToolPermissionTest {
     }
 
     @Test
-    void fullAccessStillDeniesDeniedTool() {
+    void preToolUseAskRequiresConfirmationEvenInFullAccess() {
         AtomicBoolean executed = new AtomicBoolean(false);
-        ToolPermissionManager permissionManager = new ToolPermissionManager(
-                new ToolPermissionConfig(Map.of("TestTool", ToolPermission.DENY)),
-                PermissionMode.FULL_ACCESS
-        );
+        AtomicBoolean asked = new AtomicBoolean(false);
+        ToolPermissionManager permissionManager = new ToolPermissionManager(PermissionMode.FULL_ACCESS);
+        permissionManager.setConfirmer((toolName, input) -> {
+            asked.set(true);
+            return false;
+        });
         StreamingToolExecutor executor = new StreamingToolExecutor(
                 List.of(testTool(executed)),
-                permissionManager
+                permissionManager,
+                input -> PreToolUseResult.ask("confirm")
         );
 
         executor.addTool(new Message.ToolUse("toolu_test", "TestTool", "{}"));
@@ -144,8 +139,9 @@ class StreamingToolPermissionTest {
         executor.shutdown();
 
         assertFalse(executed.get());
+        assertTrue(asked.get());
         assertTrue(results.getFirst().isError());
-        assertTrue(results.getFirst().content().contains("工具权限拒绝: TestTool"));
+        assertTrue(results.getFirst().content().contains("工具未获得用户确认: TestTool"));
     }
 
     private Tool testTool(AtomicBoolean executed) {

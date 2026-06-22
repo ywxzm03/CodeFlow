@@ -1,6 +1,7 @@
 package com.codeflow.core;
 
 import com.codeflow.compact.CompactionManager;
+import com.codeflow.hooks.PreToolUseHandler;
 import com.codeflow.llm.LLMClient;
 import com.codeflow.memory.MemoryContextProvider;
 import com.codeflow.permissions.ToolPermissionManager;
@@ -41,6 +42,7 @@ public class QueryEngine {
     private final List<Tool> tools;
     private final int maxIterations;
     private final ToolPermissionManager toolPermissionManager;
+    private final PreToolUseHandler preToolUseHandler;
     private final MemoryContextProvider memoryContextProvider;
     private final CompactionManager compactionManager;
     private final SkillStore skillStore;
@@ -53,7 +55,19 @@ public class QueryEngine {
             MemoryContextProvider memoryContextProvider,
             CompactionManager compactionManager
     ) {
-        this(llmClient, tools, maxIterations, toolPermissionManager, memoryContextProvider, compactionManager, null);
+        this(llmClient, tools, maxIterations, toolPermissionManager, PreToolUseHandler.none(), memoryContextProvider, compactionManager, null);
+    }
+
+    public QueryEngine(
+            LLMClient llmClient,
+            List<Tool> tools,
+            int maxIterations,
+            ToolPermissionManager toolPermissionManager,
+            PreToolUseHandler preToolUseHandler,
+            MemoryContextProvider memoryContextProvider,
+            CompactionManager compactionManager
+    ) {
+        this(llmClient, tools, maxIterations, toolPermissionManager, preToolUseHandler, memoryContextProvider, compactionManager, null);
     }
 
     public QueryEngine(
@@ -65,10 +79,24 @@ public class QueryEngine {
             CompactionManager compactionManager,
             SkillStore skillStore
     ) {
+        this(llmClient, tools, maxIterations, toolPermissionManager, PreToolUseHandler.none(), memoryContextProvider, compactionManager, skillStore);
+    }
+
+    public QueryEngine(
+            LLMClient llmClient,
+            List<Tool> tools,
+            int maxIterations,
+            ToolPermissionManager toolPermissionManager,
+            PreToolUseHandler preToolUseHandler,
+            MemoryContextProvider memoryContextProvider,
+            CompactionManager compactionManager,
+            SkillStore skillStore
+    ) {
         this.llmClient = Objects.requireNonNull(llmClient, "llmClient must not be null");
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
         this.maxIterations = maxIterations;
         this.toolPermissionManager = Objects.requireNonNull(toolPermissionManager, "toolPermissionManager must not be null");
+        this.preToolUseHandler = preToolUseHandler == null ? PreToolUseHandler.none() : preToolUseHandler;
         this.memoryContextProvider = memoryContextProvider;
         this.compactionManager = compactionManager;
         this.skillStore = skillStore;
@@ -179,7 +207,7 @@ public class QueryEngine {
             boolean allowReactiveRetry
     ) {
         // 创建流式工具执行器
-        StreamingToolExecutor executor = new StreamingToolExecutor(tools, toolPermissionManager);
+        StreamingToolExecutor executor = new StreamingToolExecutor(tools, toolPermissionManager, preToolUseHandler);
         try {
             StringBuilder contentBuilder = new StringBuilder();
             List<Message.ToolUse> allToolUses = new ArrayList<>();

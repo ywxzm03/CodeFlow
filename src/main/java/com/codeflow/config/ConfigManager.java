@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Optional;
 
 /**
  * 配置管理器 - 负责加载和保存 ~/.codeflow/settings.json
@@ -21,7 +22,11 @@ public class ConfigManager {
     private final ObjectMapper objectMapper;
 
     public ConfigManager() {
-        this.configDir = getConfigDir();
+        this(getConfigDir());
+    }
+
+    public ConfigManager(Path configDir) {
+        this.configDir = configDir;
         this.configFile = configDir.resolve(CONFIG_FILE_NAME);
         this.objectMapper = new ObjectMapper()
                 .enable(SerializationFeature.INDENT_OUTPUT);
@@ -53,6 +58,21 @@ public class ConfigManager {
             Settings loaded = objectMapper.readValue(configFile.toFile(), Settings.class);
             // 合并默认配置（填充缺失的字段）
             return Settings.defaults().merge(loaded);
+        } catch (Exception e) {
+            throw new IOException("读取配置文件失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 读取已存在的配置文件，不创建示例配置，也不合并默认值。
+     */
+    public Optional<Settings> loadExisting() throws IOException {
+        if (!Files.exists(configFile)) {
+            return Optional.empty();
+        }
+
+        try {
+            return Optional.of(objectMapper.readValue(configFile.toFile(), Settings.class));
         } catch (Exception e) {
             throw new IOException("读取配置文件失败: " + e.getMessage(), e);
         }

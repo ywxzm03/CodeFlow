@@ -1,5 +1,9 @@
 package com.codeflow.core;
 
+import com.codeflow.hooks.HookDecision;
+import com.codeflow.hooks.PreToolUseHandler;
+import com.codeflow.hooks.PreToolUseInput;
+import com.codeflow.hooks.PreToolUseResult;
 import com.codeflow.permissions.ToolPermission;
 import com.codeflow.permissions.ToolPermissionManager;
 import com.codeflow.tools.Tool;
@@ -26,14 +30,24 @@ public class StreamingToolExecutor {
 
     private final List<Tool> toolDefinitions;
     private final ToolPermissionManager toolPermissionManager;
+    private final PreToolUseHandler preToolUseHandler;
     private final List<TrackedTool> tools;
     private final ExecutorService executorService;
     private volatile boolean hasErrored;
     private volatile boolean discarded;
 
     public StreamingToolExecutor(List<Tool> toolDefinitions, ToolPermissionManager toolPermissionManager) {
+        this(toolDefinitions, toolPermissionManager, PreToolUseHandler.none());
+    }
+
+    public StreamingToolExecutor(
+            List<Tool> toolDefinitions,
+            ToolPermissionManager toolPermissionManager,
+            PreToolUseHandler preToolUseHandler
+    ) {
         this.toolDefinitions = Objects.requireNonNull(toolDefinitions, "toolDefinitions must not be null");
         this.toolPermissionManager = Objects.requireNonNull(toolPermissionManager, "toolPermissionManager must not be null");
+        this.preToolUseHandler = preToolUseHandler == null ? PreToolUseHandler.none() : preToolUseHandler;
         this.tools = new ArrayList<>();
         this.executorService = Executors.newCachedThreadPool();
         this.hasErrored = false;
@@ -79,7 +93,7 @@ public class StreamingToolExecutor {
             return;
         }
 
-        ToolPermission permission = toolPermissionManager.permissionFor(toolUse.name());
+        ToolPermission permission = permissionFor(toolUse);
         if (permission == ToolPermission.DENY) {
             TrackedTool tracked = new TrackedTool(
                     toolUse.id(),
@@ -122,6 +136,23 @@ public class StreamingToolExecutor {
         tools.add(tracked);
 
         processQueue();
+    }
+
+    private ToolPermission permissionFor(Message.ToolUse toolUse) {
+        PreToolUseResult preToolUseResult = preToolUseHandler.handle(new PreToolUseInput(
+                toolUse.id(),
+                toolUse.name(),
+                toolUse.input(),
+                System.getProperty("user.dir"),
+                toolPermissionManager.permissionMode()
+        ));
+        HookDecision decision = preToolUseResult == null ? HookDecision.NONE : preToolUseResult.decision();
+        return switch (decision) {
+            case ALLOW -> ToolPermission.ALLOW;
+            case ASK -> ToolPermission.ASK;
+            case DENY -> ToolPermission.DENY;
+            case NONE -> toolPermissionManager.permissionFor(toolUse.name());
+        };
     }
 
     /**

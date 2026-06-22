@@ -2,12 +2,14 @@ package com.codeflow.permissions;
 
 public class ToolPermissionManager {
 
-    private final ToolPermissionConfig toolPermissionConfig;
     private volatile PermissionMode permissionMode;
     private volatile ToolPermissionConfirmer confirmer;
 
     public ToolPermissionManager(ToolPermissionConfig toolPermissionConfig, PermissionMode permissionMode) {
-        this.toolPermissionConfig = toolPermissionConfig == null ? ToolPermissionConfig.empty() : toolPermissionConfig;
+        this(permissionMode);
+    }
+
+    public ToolPermissionManager(PermissionMode permissionMode) {
         this.permissionMode = permissionMode == null ? PermissionMode.ASK : permissionMode;
         this.confirmer = ToolPermissionConfirmer.denyByDefault();
     }
@@ -17,11 +19,10 @@ public class ToolPermissionManager {
     }
 
     public ToolPermission permissionFor(String toolName) {
-        ToolPermission configured = toolPermissionConfig.permissionFor(toolName);
-        if (permissionMode == PermissionMode.FULL_ACCESS && configured != ToolPermission.DENY) {
+        if (permissionMode == PermissionMode.FULL_ACCESS) {
             return ToolPermission.ALLOW;
         }
-        return configured;
+        return ToolPermission.ASK;
     }
 
     public PermissionMode permissionMode() {

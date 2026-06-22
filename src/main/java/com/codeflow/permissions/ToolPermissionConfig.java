@@ -3,6 +3,7 @@ package com.codeflow.permissions;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 public class ToolPermissionConfig {
 
@@ -17,10 +18,14 @@ public class ToolPermissionConfig {
     }
 
     public ToolPermission permissionFor(String toolName) {
+        return configuredPermissionFor(toolName).orElse(ToolPermission.ASK);
+    }
+
+    public Optional<ToolPermission> configuredPermissionFor(String toolName) {
         if (toolName == null) {
-            return ToolPermission.ASK;
+            return Optional.empty();
         }
-        return permissions.getOrDefault(normalizeToolName(toolName), ToolPermission.ASK);
+        return Optional.ofNullable(permissions.get(normalizeToolName(toolName)));
     }
 
     private static Map<String, ToolPermission> normalize(Map<String, ToolPermission> permissions) {

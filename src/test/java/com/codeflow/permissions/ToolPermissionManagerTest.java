@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class ToolPermissionManagerTest {
 
     @Test
-    void askModeUsesConfiguredToolPermission() {
+    void askModeIgnoresConfiguredToolPermissionAndDefaultsToAsk() {
         ToolPermissionManager manager = new ToolPermissionManager(
                 new ToolPermissionConfig(Map.of(
                         "Read", ToolPermission.ALLOW,
@@ -19,13 +19,13 @@ class ToolPermissionManagerTest {
                 PermissionMode.ASK
         );
 
-        assertEquals(ToolPermission.ALLOW, manager.permissionFor("Read"));
+        assertEquals(ToolPermission.ASK, manager.permissionFor("Read"));
         assertEquals(ToolPermission.ASK, manager.permissionFor("Write"));
-        assertEquals(ToolPermission.DENY, manager.permissionFor("Bash"));
+        assertEquals(ToolPermission.ASK, manager.permissionFor("Bash"));
     }
 
     @Test
-    void fullAccessAllowsAskAndAllowPermissions() {
+    void fullAccessAllowsToolsWithoutReadingConfiguredPermissions() {
         ToolPermissionManager manager = new ToolPermissionManager(
                 new ToolPermissionConfig(Map.of(
                         "Read", ToolPermission.ALLOW,
@@ -39,13 +39,13 @@ class ToolPermissionManagerTest {
     }
 
     @Test
-    void fullAccessKeepsDenyPermission() {
+    void fullAccessDoesNotReadConfiguredDenyPermission() {
         ToolPermissionManager manager = new ToolPermissionManager(
                 new ToolPermissionConfig(Map.of("Bash", ToolPermission.DENY)),
                 PermissionMode.FULL_ACCESS
         );
 
-        assertEquals(ToolPermission.DENY, manager.permissionFor("Bash"));
+        assertEquals(ToolPermission.ALLOW, manager.permissionFor("Bash"));
     }
 
     @Test

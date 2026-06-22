@@ -9,6 +9,8 @@ import com.codeflow.compact.ReactiveCompactor;
 import com.codeflow.compact.SnipCompactor;
 import com.codeflow.compact.TokenEstimator;
 import com.codeflow.core.QueryEngine;
+import com.codeflow.hooks.InternalSettingsPermissionPreToolUseHandler;
+import com.codeflow.hooks.PreToolUseHandler;
 import com.codeflow.llm.AnthropicClient;
 import com.codeflow.llm.LLMClient;
 import com.codeflow.memory.MemoryContextProvider;
@@ -16,7 +18,6 @@ import com.codeflow.memory.MemoryReflection;
 import com.codeflow.memory.MemoryStore;
 import com.codeflow.memory.TranscriptRecorder;
 import com.codeflow.memory.TranscriptStore;
-import com.codeflow.permissions.ToolPermissionConfig;
 import com.codeflow.permissions.ToolPermissionManager;
 import com.codeflow.skills.SkillRenderer;
 import com.codeflow.skills.SkillStore;
@@ -117,12 +118,9 @@ public class CodeFlow {
             Console.warn("[Memory] 初始化失败，已禁用记忆系统: " + e.getMessage());
         }
 
-        // 初始化工具权限管理。
-        ToolPermissionConfig toolPermissionConfig = new ToolPermissionConfig(settings.resolvedToolPermissions());
-        ToolPermissionManager toolPermissionManager = new ToolPermissionManager(
-                toolPermissionConfig,
-                settings.resolvedPermissionMode()
-        );
+        // 初始化工具权限管理。settings.json 中的 tool_permissions 由内置 PreToolUse 处理器读取。
+        ToolPermissionManager toolPermissionManager = new ToolPermissionManager(settings.resolvedPermissionMode());
+        PreToolUseHandler preToolUseHandler = new InternalSettingsPermissionPreToolUseHandler(configManager);
 
         // 组装三层压缩器。
         CompactionManager compactionManager = null;
@@ -149,6 +147,7 @@ public class CodeFlow {
                 tools,
                 settings.maxIterations(),
                 toolPermissionManager,
+                preToolUseHandler,
                 memoryContextProvider,
                 compactionManager,
                 skillStore

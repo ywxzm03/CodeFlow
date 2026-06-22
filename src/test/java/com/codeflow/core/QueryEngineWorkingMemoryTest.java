@@ -6,6 +6,7 @@ import com.codeflow.compact.CompactionPolicy;
 import com.codeflow.compact.ReactiveCompactor;
 import com.codeflow.compact.SnipCompactor;
 import com.codeflow.compact.TokenEstimator;
+import com.codeflow.hooks.PreToolUseResult;
 import com.codeflow.llm.LLMClient;
 import com.codeflow.memory.TranscriptRecorder;
 import com.codeflow.memory.TranscriptStore;
@@ -119,7 +120,8 @@ class QueryEngineWorkingMemoryTest {
                 client,
                 List.of(skillTool),
                 3,
-                new ToolPermissionManager(new ToolPermissionConfig(Map.of("Skill", ToolPermission.ALLOW)), PermissionMode.ASK),
+                new ToolPermissionManager(PermissionMode.ASK),
+                input -> PreToolUseResult.allow("test"),
                 null,
                 null,
                 skillStore
@@ -153,7 +155,7 @@ class QueryEngineWorkingMemoryTest {
                 client,
                 List.of(new SkillTool(skillStore, new SkillRenderer())),
                 1,
-                new ToolPermissionManager(new ToolPermissionConfig(Map.of("Skill", ToolPermission.ALLOW)), PermissionMode.ASK),
+                new ToolPermissionManager(PermissionMode.ASK),
                 null,
                 null,
                 skillStore
@@ -334,7 +336,14 @@ class QueryEngineWorkingMemoryTest {
                 llmClient,
                 tools,
                 maxIterations,
-                new ToolPermissionManager(toolPermissionConfig, PermissionMode.ASK),
+                new ToolPermissionManager(PermissionMode.ASK),
+                input -> toolPermissionConfig.configuredPermissionFor(input.toolName())
+                        .map(permission -> switch (permission) {
+                            case ALLOW -> PreToolUseResult.allow("test");
+                            case ASK -> PreToolUseResult.ask("test");
+                            case DENY -> PreToolUseResult.deny("test");
+                        })
+                        .orElseGet(PreToolUseResult::none),
                 null,
                 null
         );
