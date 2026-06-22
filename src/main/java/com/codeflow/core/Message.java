@@ -12,7 +12,11 @@ public sealed interface Message permits Message.User, Message.Assistant, Message
     /**
      * 用户消息
      */
-    record User(String content) implements Message {
+    record User(String content, boolean hidden) implements Message {
+        public User(String content) {
+            this(content, false);
+        }
+
         @Override
         public String role() {
             return "user";

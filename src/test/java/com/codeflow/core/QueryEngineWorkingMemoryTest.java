@@ -7,6 +7,8 @@ import com.codeflow.compact.ReactiveCompactor;
 import com.codeflow.compact.SnipCompactor;
 import com.codeflow.compact.TokenEstimator;
 import com.codeflow.hooks.PreToolUseResult;
+import com.codeflow.hooks.StopHookHandler;
+import com.codeflow.hooks.StopHookResult;
 import com.codeflow.llm.LLMClient;
 import com.codeflow.memory.TranscriptRecorder;
 import com.codeflow.memory.TranscriptStore;
@@ -81,6 +83,66 @@ class QueryEngineWorkingMemoryTest {
     }
 
     @Test
+    void stopHookFeedbackContinuesWithHiddenUserMessage() {
+        RecordingStreamingClient client = new RecordingStreamingClient(
+                Flux.just(new LLMClient.StreamEvent.TextDelta("missing validation")),
+                Flux.just(new LLMClient.StreamEvent.TextDelta("validated"))
+        );
+        QueryEngine queryEngine = new QueryEngine(
+                client,
+                List.of(),
+                3,
+                ToolPermissionManager.askByDefault(),
+                input -> PreToolUseResult.none(),
+                input -> input.stopHookActive()
+                        ? StopHookResult.allow()
+                        : StopHookResult.block("请先补充验证。"),
+                null,
+                null
+        );
+        WorkingMemory memory = new WorkingMemory();
+
+        QueryEngine.QueryResult result = queryEngine.query("finish", memory);
+
+        assertEquals(QueryEngine.QueryResult.StopReason.COMPLETED, result.stopReason());
+        assertEquals("validated", result.finalResponse());
+        assertEquals(2, client.calls.size());
+        assertTrue(client.calls.get(1).stream().anyMatch(message ->
+                message instanceof Message.User user
+                        && user.hidden()
+                        && user.content().contains("Stop hook feedback:")
+                        && user.content().contains("请先补充验证。")
+        ));
+        assertTrue(result.turnMessages().stream().noneMatch(message ->
+                message instanceof Message.User user && user.hidden()
+        ));
+    }
+
+    @Test
+    void stopHookDoesNotRecurseWhenAlreadyActive() {
+        RecordingStreamingClient client = new RecordingStreamingClient(
+                Flux.just(new LLMClient.StreamEvent.TextDelta("first")),
+                Flux.just(new LLMClient.StreamEvent.TextDelta("second"))
+        );
+        QueryEngine queryEngine = new QueryEngine(
+                client,
+                List.of(),
+                2,
+                ToolPermissionManager.askByDefault(),
+                input -> PreToolUseResult.none(),
+                input -> StopHookResult.block("again"),
+                null,
+                null
+        );
+
+        QueryEngine.QueryResult result = queryEngine.query("finish", new WorkingMemory());
+
+        assertEquals(QueryEngine.QueryResult.StopReason.COMPLETED, result.stopReason());
+        assertEquals("second", result.finalResponse());
+        assertEquals(2, client.calls.size());
+    }
+
+    @Test
     void toolResultsAreAppendedToWorkingMemory() {
         RecordingStreamingClient client = new RecordingStreamingClient(
                 Flux.just(new LLMClient.StreamEvent.ToolUse(new Message.ToolUse("toolu_test", "TestTool", "{}"))),
@@ -122,6 +184,7 @@ class QueryEngineWorkingMemoryTest {
                 3,
                 new ToolPermissionManager(PermissionMode.ASK),
                 input -> PreToolUseResult.allow("test"),
+                StopHookHandler.none(),
                 null,
                 null,
                 skillStore
@@ -156,6 +219,8 @@ class QueryEngineWorkingMemoryTest {
                 List.of(new SkillTool(skillStore, new SkillRenderer())),
                 1,
                 new ToolPermissionManager(PermissionMode.ASK),
+                null,
+                null,
                 null,
                 null,
                 skillStore

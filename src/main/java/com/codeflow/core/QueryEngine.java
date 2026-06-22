@@ -2,6 +2,9 @@ package com.codeflow.core;
 
 import com.codeflow.compact.CompactionManager;
 import com.codeflow.hooks.PreToolUseHandler;
+import com.codeflow.hooks.StopHookHandler;
+import com.codeflow.hooks.StopHookInput;
+import com.codeflow.hooks.StopHookResult;
 import com.codeflow.llm.LLMClient;
 import com.codeflow.memory.MemoryContextProvider;
 import com.codeflow.permissions.ToolPermissionManager;
@@ -43,6 +46,7 @@ public class QueryEngine {
     private final int maxIterations;
     private final ToolPermissionManager toolPermissionManager;
     private final PreToolUseHandler preToolUseHandler;
+    private final StopHookHandler stopHookHandler;
     private final MemoryContextProvider memoryContextProvider;
     private final CompactionManager compactionManager;
     private final SkillStore skillStore;
@@ -55,7 +59,7 @@ public class QueryEngine {
             MemoryContextProvider memoryContextProvider,
             CompactionManager compactionManager
     ) {
-        this(llmClient, tools, maxIterations, toolPermissionManager, PreToolUseHandler.none(), memoryContextProvider, compactionManager, null);
+        this(llmClient, tools, maxIterations, toolPermissionManager, PreToolUseHandler.none(), StopHookHandler.none(), memoryContextProvider, compactionManager, null);
     }
 
     public QueryEngine(
@@ -67,7 +71,20 @@ public class QueryEngine {
             MemoryContextProvider memoryContextProvider,
             CompactionManager compactionManager
     ) {
-        this(llmClient, tools, maxIterations, toolPermissionManager, preToolUseHandler, memoryContextProvider, compactionManager, null);
+        this(llmClient, tools, maxIterations, toolPermissionManager, preToolUseHandler, StopHookHandler.none(), memoryContextProvider, compactionManager, null);
+    }
+
+    public QueryEngine(
+            LLMClient llmClient,
+            List<Tool> tools,
+            int maxIterations,
+            ToolPermissionManager toolPermissionManager,
+            PreToolUseHandler preToolUseHandler,
+            StopHookHandler stopHookHandler,
+            MemoryContextProvider memoryContextProvider,
+            CompactionManager compactionManager
+    ) {
+        this(llmClient, tools, maxIterations, toolPermissionManager, preToolUseHandler, stopHookHandler, memoryContextProvider, compactionManager, null);
     }
 
     public QueryEngine(
@@ -79,7 +96,7 @@ public class QueryEngine {
             CompactionManager compactionManager,
             SkillStore skillStore
     ) {
-        this(llmClient, tools, maxIterations, toolPermissionManager, PreToolUseHandler.none(), memoryContextProvider, compactionManager, skillStore);
+        this(llmClient, tools, maxIterations, toolPermissionManager, PreToolUseHandler.none(), StopHookHandler.none(), memoryContextProvider, compactionManager, skillStore);
     }
 
     public QueryEngine(
@@ -88,6 +105,7 @@ public class QueryEngine {
             int maxIterations,
             ToolPermissionManager toolPermissionManager,
             PreToolUseHandler preToolUseHandler,
+            StopHookHandler stopHookHandler,
             MemoryContextProvider memoryContextProvider,
             CompactionManager compactionManager,
             SkillStore skillStore
@@ -97,6 +115,7 @@ public class QueryEngine {
         this.maxIterations = maxIterations;
         this.toolPermissionManager = Objects.requireNonNull(toolPermissionManager, "toolPermissionManager must not be null");
         this.preToolUseHandler = preToolUseHandler == null ? PreToolUseHandler.none() : preToolUseHandler;
+        this.stopHookHandler = stopHookHandler == null ? StopHookHandler.none() : stopHookHandler;
         this.memoryContextProvider = memoryContextProvider;
         this.compactionManager = compactionManager;
         this.skillStore = skillStore;
@@ -116,6 +135,7 @@ public class QueryEngine {
         TurnState turnState = new TurnState(startIndex, userMessage);
 
         int iteration = 0;
+        boolean stopHookActive = false;
 
         while (iteration < maxIterations) {
             iteration++;
@@ -123,10 +143,11 @@ public class QueryEngine {
             Console.info("\n[Iteration " + iteration + "] 调用LLM...");
 
             // 流式执行模式
-            QueryResult result = executeStreamingIteration(workingMemory, turnState, iteration);
+            QueryResult result = executeStreamingIteration(workingMemory, turnState, iteration, stopHookActive);
             if (result != null) {
                 return result;
             }
+            stopHookActive = lastMessageIsHiddenStopFeedback(workingMemory);
         }
 
         // 达到最大迭代次数
@@ -190,13 +211,18 @@ public class QueryEngine {
     /**
      * 流式执行模式的迭代
      */
-    private QueryResult executeStreamingIteration(WorkingMemory workingMemory, TurnState turnState, int iteration) {
+    private QueryResult executeStreamingIteration(
+            WorkingMemory workingMemory,
+            TurnState turnState,
+            int iteration,
+            boolean stopHookActive
+    ) {
         String systemPrompt = systemPrompt();
         if (compactionManager != null) {
             compactionManager.beforeModelCall(systemPrompt, workingMemory, tools);
         }
 
-        return executeStreamingAttempt(workingMemory, turnState, iteration, systemPrompt, true);
+        return executeStreamingAttempt(workingMemory, turnState, iteration, systemPrompt, true, stopHookActive);
     }
 
     private QueryResult executeStreamingAttempt(
@@ -204,7 +230,8 @@ public class QueryEngine {
             TurnState turnState,
             int iteration,
             String systemPrompt,
-            boolean allowReactiveRetry
+            boolean allowReactiveRetry,
+            boolean stopHookActive
     ) {
         // 创建流式工具执行器
         StreamingToolExecutor executor = new StreamingToolExecutor(tools, toolPermissionManager, preToolUseHandler);
@@ -241,7 +268,7 @@ public class QueryEngine {
                     );
                     if (reactiveResult.compacted()) {
                         Console.warn("\n[Compact] 上下文超限，已触发 reactive compact 并重试本轮模型调用");
-                        return executeStreamingAttempt(workingMemory, turnState, iteration, systemPrompt, false);
+                        return executeStreamingAttempt(workingMemory, turnState, iteration, systemPrompt, false, stopHookActive);
                     }
                 }
                 // 流式中断：取消已启动的工具，丢弃本轮所有副作用，不写入半截消息
@@ -267,6 +294,11 @@ public class QueryEngine {
 
             // 没有工具调用 -> 对话结束
             if (allToolUses.isEmpty()) {
+                StopHookResult stopHookResult = runStopHook(content, stopHookActive);
+                if (!stopHookActive && stopHookResult.blocked()) {
+                    workingMemory.append(new Message.User(formatStopHookFeedback(stopHookResult.feedback()), true));
+                    return null;
+                }
                 Console.info("\n[完成] 没有更多工具调用，对话结束");
                 return new QueryResult(
                         content,
@@ -303,10 +335,37 @@ public class QueryEngine {
         }
     }
 
+    private StopHookResult runStopHook(String lastAssistantMessage, boolean stopHookActive) {
+        StopHookResult result = stopHookHandler.handle(new StopHookInput(
+                lastAssistantMessage,
+                System.getProperty("user.dir"),
+                toolPermissionManager.permissionMode(),
+                stopHookActive
+        ));
+        return result == null ? StopHookResult.allow() : result;
+    }
+
+    private String formatStopHookFeedback(String feedback) {
+        return "Stop hook feedback:\n" + (feedback == null ? "" : feedback);
+    }
+
+    private boolean lastMessageIsHiddenStopFeedback(WorkingMemory workingMemory) {
+        List<Message> messages = workingMemory.snapshot();
+        if (messages.isEmpty()) {
+            return false;
+        }
+        Message last = messages.getLast();
+        return last instanceof Message.User user
+                && user.hidden()
+                && user.content().startsWith("Stop hook feedback:\n");
+    }
+
     private List<Message> sliceCurrentTurn(WorkingMemory workingMemory, TurnState turnState) {
         List<Message> snapshot = workingMemory.snapshot();
         int startIndex = currentTurnStart(snapshot, turnState);
-        return List.copyOf(snapshot.subList(startIndex, snapshot.size()));
+        return snapshot.subList(startIndex, snapshot.size()).stream()
+                .filter(message -> !(message instanceof Message.User user && user.hidden()))
+                .toList();
     }
 
     private void rollbackCurrentTurn(WorkingMemory workingMemory, TurnState turnState) {

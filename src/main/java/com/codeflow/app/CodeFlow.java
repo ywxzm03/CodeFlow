@@ -10,6 +10,7 @@ import com.codeflow.compact.SnipCompactor;
 import com.codeflow.compact.TokenEstimator;
 import com.codeflow.core.QueryEngine;
 import com.codeflow.hooks.InternalSettingsPermissionPreToolUseHandler;
+import com.codeflow.hooks.InternalValidationStopHookHandler;
 import com.codeflow.hooks.PreToolUseHandler;
 import com.codeflow.llm.AnthropicClient;
 import com.codeflow.llm.LLMClient;
@@ -148,6 +149,7 @@ public class CodeFlow {
                 settings.maxIterations(),
                 toolPermissionManager,
                 preToolUseHandler,
+                new InternalValidationStopHookHandler(),
                 memoryContextProvider,
                 compactionManager,
                 skillStore
