@@ -212,7 +212,7 @@ class SlashCommandRegistryTest {
 
     @Test
     void promptUsesBlueCodeWrapPrefix() {
-        assertTrue(TerminalSession.PROMPT.contains("CodeWrap>"));
+        assertTrue(TerminalSession.PROMPT.contains("CodeFlow>"));
         assertTrue(TerminalSession.PROMPT.startsWith("\u001B[34m"));
     }
 
