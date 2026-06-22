@@ -30,7 +30,7 @@ import java.util.stream.Stream;
  */
 public final class TranscriptStore {
 
-    private static final String CONFIG_DIR_NAME = ".codewrap";
+    private static final String CONFIG_DIR_NAME = ".codewarp";
     private static final String MEMORY_DIR_NAME = "memory";
     private static final String L5_DIR = "L5";
     private static final String JSONL_EXTENSION = ".jsonl";

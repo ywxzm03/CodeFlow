@@ -11,7 +11,7 @@ import java.nio.file.StandardOpenOption;
  */
 public class MemoryStore {
 
-    private static final String CONFIG_DIR_NAME = ".codewrap";
+    private static final String CONFIG_DIR_NAME = ".codewarp";
     private static final String MEMORY_DIR_NAME = "memory";
     private static final String L0_DIR = "L0";
     private static final String L1_DIR = "L1";
