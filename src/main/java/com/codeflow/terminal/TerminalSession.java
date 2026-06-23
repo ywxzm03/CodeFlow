@@ -12,6 +12,7 @@ import com.codeflow.memory.TranscriptRecorder;
 import com.codeflow.memory.TranscriptSession;
 import com.codeflow.memory.TranscriptStore;
 import com.codeflow.permissions.PermissionMode;
+import com.codeflow.permissions.ToolPermission;
 import com.codeflow.permissions.ToolPermissionManager;
 import com.codeflow.skills.SkillDefinition;
 import com.codeflow.skills.SkillRenderer;
@@ -27,6 +28,7 @@ import org.jline.utils.InfoCmp;
 import org.jline.utils.NonBlockingReader;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -218,6 +220,11 @@ public final class TerminalSession implements AutoCloseable {
             return;
         }
 
+        if ("/hook".equals(input) || input.startsWith("/hook ")) {
+            handleHookCommand();
+            return;
+        }
+
         if ("/model".equals(input)) {
             handleModelCommand();
             return;
@@ -305,6 +312,11 @@ public final class TerminalSession implements AutoCloseable {
             case UNAVAILABLE -> terminal.writer().println("Compact is unavailable: " + result.reason() + ".");
             case FAILED -> terminal.writer().println("Compact failed: " + result.reason());
         }
+        terminal.writer().flush();
+    }
+
+    private void handleHookCommand() {
+        terminal.writer().println(formatConfiguredHooks(settings, configManager.getConfigFilePath()));
         terminal.writer().flush();
     }
 
@@ -742,6 +754,35 @@ public final class TerminalSession implements AutoCloseable {
                         session.sessionId() + " (" + session.messageCount() + " messages)"
                 ))
                 .toList();
+    }
+
+    static String formatConfiguredHooks(Settings settings, Path settingsPath) {
+        Settings resolved = settings == null ? Settings.defaults() : settings;
+        StringBuilder builder = new StringBuilder();
+        builder.append("Configured hooks:\n");
+        builder.append("  PreToolUse\n");
+        builder.append("    Handler: settings tool permissions\n");
+        builder.append("    Source: ").append(settingsPath == null ? "settings.json" : settingsPath).append('\n');
+        builder.append("    Permission mode: ").append(resolved.resolvedPermissionMode().configValue()).append('\n');
+
+        Map<String, ToolPermission> permissions = resolved.resolvedToolPermissions();
+        if (permissions.isEmpty()) {
+            builder.append("    Tool permissions: none\n");
+        } else {
+            builder.append("    Tool permissions:\n");
+            permissions.entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(entry -> builder.append("      ")
+                            .append(entry.getKey())
+                            .append(": ")
+                            .append(entry.getValue().configValue())
+                            .append('\n'));
+        }
+
+        builder.append("  Stop\n");
+        builder.append("    Handler: validation reminder\n");
+        builder.append("    Rule: blocks final replies that do not mention verification");
+        return builder.toString();
     }
 
     @Override

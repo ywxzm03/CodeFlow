@@ -39,6 +39,7 @@ public final class SlashCommandRegistry {
             context.print(formatHelp(commands));
             return SlashCommand.Result.CONTINUE;
         }));
+        commands.add(new SlashCommand("hook", "Show configured hooks", (context, arguments) -> SlashCommand.Result.CONTINUE));
         commands.add(new SlashCommand("model", "Select active model", (context, arguments) -> {
             context.print("Current model: " + modelName);
             return SlashCommand.Result.CONTINUE;

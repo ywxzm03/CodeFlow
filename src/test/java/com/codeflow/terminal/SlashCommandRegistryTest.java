@@ -5,6 +5,7 @@ import com.codeflow.llm.LLMClient;
 import com.codeflow.memory.TranscriptSession;
 import com.codeflow.memory.TranscriptRecorder;
 import com.codeflow.permissions.PermissionMode;
+import com.codeflow.permissions.ToolPermission;
 import com.codeflow.permissions.ToolPermissionManager;
 import com.codeflow.skills.SkillRenderer;
 import com.codeflow.skills.SkillStore;
@@ -41,7 +42,7 @@ class SlashCommandRegistryTest {
                 .map(SlashCommand::displayName)
                 .toList();
 
-        assertEquals(List.of("/clear", "/compact", "/exit", "/help", "/model", "/permissions", "/resume"), matches);
+        assertEquals(List.of("/clear", "/compact", "/exit", "/help", "/hook", "/model", "/permissions", "/resume"), matches);
     }
 
     @Test
@@ -73,7 +74,7 @@ class SlashCommandRegistryTest {
         reader.getBuffer().write("/");
         completer.complete(reader, null, candidates);
 
-        assertEquals(List.of("/clear", "/compact", "/exit", "/help", "/model", "/permissions", "/resume"), candidateValues(candidates));
+        assertEquals(List.of("/clear", "/compact", "/exit", "/help", "/hook", "/model", "/permissions", "/resume"), candidateValues(candidates));
     }
 
     @Test
@@ -126,6 +127,19 @@ class SlashCommandRegistryTest {
         completer.complete(reader, null, candidates);
 
         assertEquals(List.of("/resume"), candidateValues(candidates));
+    }
+
+    @Test
+    void completerFiltersHookCommandAsUserTypes() {
+        SlashCommandRegistry registry = registry();
+        SlashCommandCompleter completer = new SlashCommandCompleter(registry);
+        List<Candidate> candidates = new ArrayList<>();
+        var reader = LineReaderBuilder.builder().build();
+
+        reader.getBuffer().write("/ho");
+        completer.complete(reader, null, candidates);
+
+        assertEquals(List.of("/hook"), candidateValues(candidates));
     }
 
     @Test
@@ -267,9 +281,40 @@ class SlashCommandRegistryTest {
                 .toList());
     }
 
+    @Test
+    void formatConfiguredHooksShowsInternalHooksAndToolPermissions() {
+        Settings settings = new Settings(
+                "key",
+                "url",
+                "A",
+                Settings.defaults().resolvedModels(),
+                1000,
+                5,
+                PermissionMode.FULL_ACCESS,
+                Map.of(
+                        "Read", ToolPermission.ALLOW,
+                        "Bash", ToolPermission.DENY
+                ),
+                Settings.Compaction.defaults()
+        );
+
+        String formatted = TerminalSession.formatConfiguredHooks(settings, tempDir.resolve("settings.json"));
+
+        assertTrue(formatted.contains("Configured hooks:"));
+        assertTrue(formatted.contains("PreToolUse"));
+        assertTrue(formatted.contains("Handler: settings tool permissions"));
+        assertTrue(formatted.contains("Source: " + tempDir.resolve("settings.json")));
+        assertTrue(formatted.contains("Permission mode: full_access"));
+        assertTrue(formatted.contains("Bash: deny"));
+        assertTrue(formatted.contains("Read: allow"));
+        assertTrue(formatted.contains("Stop"));
+        assertTrue(formatted.contains("Handler: validation reminder"));
+    }
+
     private SlashCommandRegistry registry() {
         return new SlashCommandRegistry(List.of(
                 new SlashCommand("help", "Show help", (context, arguments) -> SlashCommand.Result.CONTINUE),
+                new SlashCommand("hook", "Show hooks", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("model", "Show model", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("permissions", "Select permission mode", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("resume", "Resume session", (context, arguments) -> SlashCommand.Result.CONTINUE),
