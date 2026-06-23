@@ -279,7 +279,7 @@ public class QueryEngine {
         // 创建流式工具执行器
         StreamingToolExecutor executor = new StreamingToolExecutor(
                 tools,
-                new DefaultToolAdmissionPolicy(toolPermissionManager, preToolUseHandler),
+                new DefaultToolAdmissionPolicy(toolPermissionManager, preToolUseHandler, toolExecutionContext),
                 token,
                 toolExecutionContext
         );

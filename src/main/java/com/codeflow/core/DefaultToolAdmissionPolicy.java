@@ -6,6 +6,7 @@ import com.codeflow.hooks.PreToolUseInput;
 import com.codeflow.hooks.PreToolUseResult;
 import com.codeflow.permissions.ToolPermission;
 import com.codeflow.permissions.ToolPermissionManager;
+import com.codeflow.tools.ToolExecutionContext;
 
 import java.util.Objects;
 
@@ -13,13 +14,23 @@ public class DefaultToolAdmissionPolicy implements ToolAdmissionPolicy {
 
     private final ToolPermissionManager toolPermissionManager;
     private final PreToolUseHandler preToolUseHandler;
+    private final ToolExecutionContext toolExecutionContext;
 
     public DefaultToolAdmissionPolicy(
             ToolPermissionManager toolPermissionManager,
             PreToolUseHandler preToolUseHandler
     ) {
+        this(toolPermissionManager, preToolUseHandler, ToolExecutionContext.defaultContext());
+    }
+
+    public DefaultToolAdmissionPolicy(
+            ToolPermissionManager toolPermissionManager,
+            PreToolUseHandler preToolUseHandler,
+            ToolExecutionContext toolExecutionContext
+    ) {
         this.toolPermissionManager = Objects.requireNonNull(toolPermissionManager, "toolPermissionManager must not be null");
         this.preToolUseHandler = preToolUseHandler == null ? PreToolUseHandler.none() : preToolUseHandler;
+        this.toolExecutionContext = toolExecutionContext == null ? ToolExecutionContext.defaultContext() : toolExecutionContext;
     }
 
     @Override
@@ -49,7 +60,9 @@ public class DefaultToolAdmissionPolicy implements ToolAdmissionPolicy {
             case ALLOW -> ToolPermission.ALLOW;
             case ASK -> ToolPermission.ASK;
             case DENY -> ToolPermission.DENY;
-            case NONE -> toolPermissionManager.permissionFor(toolUse.name());
+            case NONE -> toolExecutionContext.isBatchWorker()
+                    ? ToolPermission.ALLOW
+                    : toolPermissionManager.permissionFor(toolUse.name());
         };
     }
 }
