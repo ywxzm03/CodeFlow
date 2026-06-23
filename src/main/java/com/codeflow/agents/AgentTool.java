@@ -40,7 +40,7 @@ public final class AgentTool implements Tool {
 
     @Override
     public String description() {
-        return "Launch a Planner or Coder subagent. Coder runs in the background inside an isolated git worktree.";
+        return "Launch an Explorer, Planner, Coder, or Verifier subagent. All can run foreground or background; Coder uses an isolated git worktree.";
     }
 
     @Override
@@ -55,7 +55,7 @@ public final class AgentTool implements Tool {
                     },
                     "subagent_type": {
                       "type": "string",
-                      "enum": ["Planner", "Coder"],
+                      "enum": ["Explorer", "Planner", "Coder", "Verifier"],
                       "description": "Subagent type"
                     },
                     "description": {
@@ -72,12 +72,16 @@ public final class AgentTool implements Tool {
                     },
                     "run_in_background": {
                       "type": "boolean",
-                      "description": "Must be true for Coder"
+                      "description": "Run the agent in the background. Defaults: Explorer/Planner foreground, Coder/Verifier background"
                     },
                     "isolation": {
                       "type": "string",
                       "enum": ["worktree"],
-                      "description": "Must be worktree for Coder"
+                      "description": "Required for Coder; rejected for Explorer, Planner, and Verifier"
+                    },
+                    "target_agent_id": {
+                      "type": "string",
+                      "description": "Verifier target Coder agent id. If omitted, Verifier checks the main project directory"
                     }
                   },
                   "required": ["prompt"]
@@ -96,26 +100,33 @@ public final class AgentTool implements Tool {
             JsonNode node = objectMapper.readTree(input);
             String prompt = node.get("prompt").asText();
             String type = node.has("subagent_type") ? node.get("subagent_type").asText() : AgentDefinition.CODER.type();
+            AgentDefinition agent = AgentDefinition.byType(type);
             String description = node.has("description") ? node.get("description").asText() : "";
             String batchId = node.has("batch_id") ? node.get("batch_id").asText() : "manual";
             String unitId = node.has("unit_id") ? node.get("unit_id").asText() : "manual";
+            boolean background = node.has("run_in_background") ? node.get("run_in_background").asBoolean() : agent.background();
+            String isolation = node.has("isolation") ? node.get("isolation").asText() : (agent.worktreeIsolation() ? "worktree" : "");
+            String targetAgentId = node.has("target_agent_id") ? node.get("target_agent_id").asText() : "";
+            validateCombination(agent, isolation, targetAgentId);
 
-            if (AgentDefinition.PLANNER.type().equals(type)) {
-                var result = runner.runPlanner(prompt, cancellationToken);
+            AgentInvocation invocation = new AgentInvocation(
+                    agent,
+                    batchId,
+                    unitId,
+                    prompt,
+                    description,
+                    background,
+                    isolation,
+                    targetAgentId
+            );
+
+            if (!background) {
+                var result = runner.runForeground(invocation, registry, worktreeService, cancellationToken);
                 return ToolExecutionResult.success(result.finalResponse());
             }
 
-            if (!AgentDefinition.CODER.type().equals(type)) {
-                return ToolExecutionResult.error("Unknown subagent_type: " + type);
-            }
-            boolean background = node.has("run_in_background") && node.get("run_in_background").asBoolean();
-            String isolation = node.has("isolation") ? node.get("isolation").asText() : "";
-            if (!background || !"worktree".equals(isolation)) {
-                return ToolExecutionResult.error("Coder requires run_in_background=true and isolation=\"worktree\"");
-            }
-
-            BackgroundAgentTask task = runner.launchCoder(
-                    new AgentInvocation(AgentDefinition.CODER, batchId, unitId, prompt, description),
+            BackgroundAgentTask task = runner.launchBackground(
+                    invocation,
                     registry,
                     worktreeService,
                     executorService
@@ -144,7 +155,8 @@ public final class AgentTool implements Tool {
                     "batch_id",
                     "unit_id",
                     "run_in_background",
-                    "isolation"
+                    "isolation",
+                    "target_agent_id"
             );
             for (String field : iterable(node.fieldNames())) {
                 if (!allowed.contains(field)) {
@@ -155,9 +167,15 @@ public final class AgentTool implements Tool {
             optionalText(node, "description");
             optionalText(node, "batch_id");
             optionalText(node, "unit_id");
+            optionalText(node, "target_agent_id");
             optionalBoolean(node, "run_in_background");
-            optionalEnum(node, "subagent_type", Set.of("Planner", "Coder"));
+            optionalEnum(node, "subagent_type", Set.of("Explorer", "Planner", "Coder", "Verifier"));
             optionalEnum(node, "isolation", Set.of("worktree"));
+            String type = node.has("subagent_type") ? node.get("subagent_type").asText() : AgentDefinition.CODER.type();
+            AgentDefinition agent = AgentDefinition.byType(type);
+            String isolation = node.has("isolation") ? node.get("isolation").asText() : (agent.worktreeIsolation() ? "worktree" : "");
+            String targetAgentId = node.has("target_agent_id") ? node.get("target_agent_id").asText() : "";
+            validateCombination(agent, isolation, targetAgentId);
             return ValidationResult.valid();
         } catch (Exception e) {
             return ValidationResult.invalid(e.getMessage());
@@ -196,6 +214,24 @@ public final class AgentTool implements Tool {
         }
         if (!value.isTextual() || !allowed.contains(value.asText())) {
             throw new IllegalArgumentException("invalid enum parameter: " + field);
+        }
+    }
+
+    private static void validateCombination(AgentDefinition agent, String isolation, String targetAgentId) {
+        if (AgentDefinition.CODER.type().equals(agent.type())) {
+            if (!"worktree".equals(isolation)) {
+                throw new IllegalArgumentException("Coder requires isolation=\"worktree\"");
+            }
+            if (targetAgentId != null && !targetAgentId.isBlank()) {
+                throw new IllegalArgumentException("target_agent_id is only valid for Verifier");
+            }
+            return;
+        }
+        if (isolation != null && !isolation.isBlank()) {
+            throw new IllegalArgumentException(agent.type() + " does not support isolation=\"worktree\"");
+        }
+        if (!AgentDefinition.VERIFIER.type().equals(agent.type()) && targetAgentId != null && !targetAgentId.isBlank()) {
+            throw new IllegalArgumentException("target_agent_id is only valid for Verifier");
         }
     }
 }

@@ -37,7 +37,17 @@ class SubagentRunnerTest {
 
         runner.runPlanner("make a plan", null);
 
-        assertEquals(List.of("Read", "Grep", "Glob"), client.lastToolNames);
+        assertEquals(List.of("Read", "Grep", "Glob", "Bash"), client.lastToolNames);
+    }
+
+    @Test
+    void explorerOnlyReceivesReadOnlyTools() {
+        CapturingClient client = new CapturingClient("findings");
+        SubagentRunner runner = new SubagentRunner(client, allTools(), 1, null, tempDir);
+
+        runner.runExplorer("search code", null);
+
+        assertEquals(List.of("Read", "Grep", "Glob", "Bash"), client.lastToolNames);
     }
 
     @Test

@@ -152,7 +152,8 @@ public class CodeFlow {
                 llmClient,
                 subagentTools,
                 settings.maxIterations(),
-                skillStore
+                skillStore,
+                projectRoot
         );
         BatchCoordinator batchCoordinator = new BatchCoordinator(
                 subagentRunner,

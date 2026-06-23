@@ -48,7 +48,7 @@ public record ToolExecutionContext(
     public static ToolExecutionContext subagentReadOnly(Path cwd, String agentId, String batchId, String agentType) {
         return new ToolExecutionContext(
                 cwd,
-                null,
+                cwd,
                 PermissionMode.SUBAGENT_READ_ONLY,
                 agentId,
                 batchId,

@@ -60,7 +60,7 @@ public class DefaultToolAdmissionPolicy implements ToolAdmissionPolicy {
             case ALLOW -> ToolPermission.ALLOW;
             case ASK -> ToolPermission.ASK;
             case DENY -> ToolPermission.DENY;
-            case NONE -> toolExecutionContext.isBatchWorker()
+            case NONE -> toolExecutionContext.isSubagentMode()
                     ? ToolPermission.ALLOW
                     : toolPermissionManager.permissionFor(toolUse.name());
         };

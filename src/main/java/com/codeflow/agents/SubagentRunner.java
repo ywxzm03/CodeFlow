@@ -16,18 +16,22 @@ import com.codeflow.tools.ToolExecutionContext;
 import com.codeflow.worktree.WorktreeService;
 import com.codeflow.worktree.WorktreeSession;
 
+import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 
 public final class SubagentRunner {
-    private static final Set<String> PLANNER_TOOLS = Set.of("Read", "Grep", "Glob");
+    private static final Set<String> READ_ONLY_TOOLS = Set.of("Read", "Grep", "Glob", "Bash");
+    private static final Set<String> VERIFIER_TOOLS = Set.of("Read", "Grep", "Glob", "Bash");
 
     private final LLMClient llmClient;
     private final List<Tool> tools;
     private final int maxIterations;
     private final SkillStore skillStore;
+    private final Path projectRoot;
 
     public SubagentRunner(
             LLMClient llmClient,
@@ -35,23 +39,45 @@ public final class SubagentRunner {
             int maxIterations,
             SkillStore skillStore
     ) {
+        this(llmClient, tools, maxIterations, skillStore, Path.of(System.getProperty("user.dir")));
+    }
+
+    public SubagentRunner(
+            LLMClient llmClient,
+            List<Tool> tools,
+            int maxIterations,
+            SkillStore skillStore,
+            Path projectRoot
+    ) {
         this.llmClient = Objects.requireNonNull(llmClient, "llmClient must not be null");
         this.tools = List.copyOf(Objects.requireNonNull(tools, "tools must not be null"));
         this.maxIterations = maxIterations;
         this.skillStore = skillStore;
+        this.projectRoot = (projectRoot == null ? Path.of(System.getProperty("user.dir")) : projectRoot)
+                .toAbsolutePath()
+                .normalize();
     }
 
     public QueryEngine.QueryResult runPlanner(String prompt, CancellationToken cancellationToken) {
-        QueryEngine queryEngine = new QueryEngine(
-                llmClient,
-                readOnlyTools(),
-                maxIterations,
-                new ToolPermissionManager(PermissionMode.FULL_ACCESS),
-                null,
-                null,
-                skillStore
-        );
-        return queryEngine.query(prompt, new WorkingMemory(), cancellationToken);
+        return runReadOnlyForeground(AgentDefinition.PLANNER, prompt, cancellationToken);
+    }
+
+    public QueryEngine.QueryResult runExplorer(String prompt, CancellationToken cancellationToken) {
+        return runReadOnlyForeground(AgentDefinition.EXPLORER, prompt, cancellationToken);
+    }
+
+    public QueryEngine.QueryResult runForeground(
+            AgentInvocation invocation,
+            BackgroundTaskRegistry registry,
+            WorktreeService worktreeService,
+            CancellationToken cancellationToken
+    ) {
+        return switch (invocation.agent().type()) {
+            case "Explorer", "Planner" -> runReadOnlyForeground(invocation.agent(), invocation.prompt(), cancellationToken);
+            case "Coder" -> runCoderForeground(invocation, worktreeService, cancellationToken);
+            case "Verifier" -> runVerifierForeground(invocation, registry, cancellationToken);
+            default -> throw new IllegalArgumentException("Unknown subagent_type: " + invocation.agent().type());
+        };
     }
 
     public BackgroundAgentTask launchCoder(
@@ -60,22 +86,165 @@ public final class SubagentRunner {
             WorktreeService worktreeService,
             ExecutorService executorService
     ) {
+        return launchBackground(invocation, registry, worktreeService, executorService);
+    }
+
+    public BackgroundAgentTask launchBackground(
+            AgentInvocation invocation,
+            BackgroundTaskRegistry registry,
+            WorktreeService worktreeService,
+            ExecutorService executorService
+    ) {
         String agentId = WorktreeService.newAgentId();
         BackgroundAgentTask task = registry.register(
-                invocation.batchId(),
+                valueOr(invocation.batchId(), "manual"),
                 agentId,
-                invocation.unitId(),
+                invocation.agent().type(),
+                invocation.displayName(),
+                valueOr(invocation.unitId(), "manual"),
+                invocation.targetAgentId(),
                 invocation.description()
         );
-        executorService.submit(() -> runCoder(invocation, task, registry, worktreeService));
+        executorService.submit(() -> runBackground(invocation, task, registry, worktreeService, null));
         return task;
+    }
+
+    public BackgroundAgentTask launchCoderWithVerifier(
+            AgentInvocation coderInvocation,
+            AgentInvocation verifierInvocation,
+            BackgroundTaskRegistry registry,
+            WorktreeService worktreeService,
+            ExecutorService executorService
+    ) {
+        String agentId = WorktreeService.newAgentId();
+        BackgroundAgentTask task = registry.register(
+                valueOr(coderInvocation.batchId(), "manual"),
+                agentId,
+                AgentDefinition.CODER.type(),
+                coderInvocation.displayName(),
+                valueOr(coderInvocation.unitId(), "manual"),
+                "",
+                coderInvocation.description()
+        );
+        executorService.submit(() -> runBackground(coderInvocation, task, registry, worktreeService, verifierInvocation));
+        return task;
+    }
+
+    private QueryEngine.QueryResult runReadOnlyForeground(
+            AgentDefinition agent,
+            String prompt,
+            CancellationToken cancellationToken
+    ) {
+        ToolExecutionContext context = ToolExecutionContext.subagentReadOnly(projectRoot, null, null, agent.type());
+        return query(prompt, readOnlyTools(), context, cancellationToken);
+    }
+
+    private QueryEngine.QueryResult runCoderForeground(
+            AgentInvocation invocation,
+            WorktreeService worktreeService,
+            CancellationToken cancellationToken
+    ) {
+        try {
+            String agentId = WorktreeService.newAgentId();
+            WorktreeSession worktreeSession = worktreeService.createAgentWorktree(agentId);
+            ToolExecutionContext context = ToolExecutionContext.subagentCoder(
+                    worktreeSession.worktreePath(),
+                    agentId,
+                    valueOr(invocation.batchId(), "manual")
+            );
+            return query(invocation.prompt(), tools, context, cancellationToken);
+        } catch (Exception e) {
+            throw new IllegalStateException("Coder foreground run failed: " + e.getMessage(), e);
+        }
+    }
+
+    private QueryEngine.QueryResult runVerifierForeground(
+            AgentInvocation invocation,
+            BackgroundTaskRegistry registry,
+            CancellationToken cancellationToken
+    ) {
+        VerifierTarget target = verifierTarget(invocation, registry);
+        ToolExecutionContext context = ToolExecutionContext.subagentVerifier(
+                target.cwd(),
+                target.cwd(),
+                null,
+                valueOr(invocation.batchId(), "manual"),
+                invocation.targetAgentId()
+        );
+        return query(invocation.prompt(), verifierTools(), context, cancellationToken);
+    }
+
+    private void runBackground(
+            AgentInvocation invocation,
+            BackgroundAgentTask task,
+            BackgroundTaskRegistry registry,
+            WorktreeService worktreeService,
+            AgentInvocation verifierInvocation
+    ) {
+        switch (invocation.agent().type()) {
+            case "Explorer", "Planner" -> runReadOnlyBackground(invocation, task, registry);
+            case "Coder" -> runCoder(invocation, task, registry, worktreeService, verifierInvocation);
+            case "Verifier" -> runVerifier(invocation, task, registry);
+            default -> {
+                task.markFailed("Unknown subagent_type: " + invocation.agent().type());
+                registry.persist(task);
+            }
+        }
+    }
+
+    private void runReadOnlyBackground(
+            AgentInvocation invocation,
+            BackgroundAgentTask task,
+            BackgroundTaskRegistry registry
+    ) {
+        try {
+            task.markRunning(null, null);
+            registry.persist(task);
+            ToolExecutionContext context = ToolExecutionContext.subagentReadOnly(
+                    projectRoot,
+                    task.agentId(),
+                    task.batchId(),
+                    invocation.agent().type()
+            );
+            QueryEngine.QueryResult queryResult = query(
+                    invocation.prompt(),
+                    readOnlyTools(),
+                    context,
+                    task.cancellationToken()
+            );
+            registry.appendLog(task.agentId(), queryResult.finalResponse() + System.lineSeparator());
+            if (queryResult.stopReason() == QueryEngine.QueryResult.StopReason.USER_CANCELLED || task.cancellationToken().isCancelled()) {
+                task.cancel();
+                registry.persist(task);
+                return;
+            }
+            AgentResult result = AgentResultParser.parseGeneric(
+                    invocation.agent(),
+                    task.agentId(),
+                    task.batchId(),
+                    task.unitId(),
+                    queryResult.finalResponse(),
+                    projectRoot
+            );
+            if (result.status() == AgentResult.Status.SUCCESS) {
+                task.markSuccess("", result.resultSummary(), result.testSummary(), result.verdict());
+            } else {
+                task.markFailed(result.failureReason());
+            }
+            registry.persist(task);
+        } catch (Exception e) {
+            task.markFailed(e.getMessage());
+            registry.appendLog(task.agentId(), "ERROR: " + e.getMessage() + System.lineSeparator());
+            registry.persist(task);
+        }
     }
 
     private void runCoder(
             AgentInvocation invocation,
             BackgroundAgentTask task,
             BackgroundTaskRegistry registry,
-            WorktreeService worktreeService
+            WorktreeService worktreeService,
+            AgentInvocation verifierInvocation
     ) {
         WorktreeSession worktreeSession = null;
         try {
@@ -88,21 +257,10 @@ public final class SubagentRunner {
                     task.agentId(),
                     task.batchId()
             );
-            QueryEngine queryEngine = new QueryEngine(
-                    llmClient,
-                    tools,
-                    maxIterations,
-                    new ToolPermissionManager(PermissionMode.BATCH_WORKER),
-                    PreToolUseHandler.none(),
-                    StopHookHandler.none(),
-                    null,
-                    null,
-                    skillStore,
-                    context
-            );
-            QueryEngine.QueryResult queryResult = queryEngine.query(
+            QueryEngine.QueryResult queryResult = query(
                     invocation.prompt(),
-                    new WorkingMemory(),
+                    tools,
+                    context,
                     task.cancellationToken()
             );
             registry.appendLog(task.agentId(), queryResult.finalResponse() + System.lineSeparator());
@@ -123,6 +281,30 @@ public final class SubagentRunner {
             );
             if (result.status() == AgentResult.Status.SUCCESS) {
                 task.markSuccess(result.commitSha(), result.resultSummary(), result.testSummary());
+                registry.persist(task);
+                if (verifierInvocation != null) {
+                    AgentInvocation targetedVerifier = new AgentInvocation(
+                            AgentDefinition.VERIFIER,
+                            task.batchId(),
+                            task.unitId(),
+                            verifierInvocation.prompt(),
+                            verifierInvocation.description(),
+                            true,
+                            "",
+                            task.agentId()
+                    );
+                    BackgroundAgentTask verifierTask = registry.register(
+                            task.batchId(),
+                            WorktreeService.newAgentId(),
+                            AgentDefinition.VERIFIER.type(),
+                            targetedVerifier.displayName(),
+                            task.unitId(),
+                            task.agentId(),
+                            targetedVerifier.description()
+                    );
+                    runVerifier(targetedVerifier, verifierTask, registry);
+                    return;
+                }
             } else {
                 task.markFailed(result.failureReason());
             }
@@ -134,9 +316,123 @@ public final class SubagentRunner {
         }
     }
 
+    private void runVerifier(
+            AgentInvocation invocation,
+            BackgroundAgentTask task,
+            BackgroundTaskRegistry registry
+    ) {
+        try {
+            VerifierTarget target = verifierTarget(invocation, registry);
+            task.markRunning(target.cwd(), null);
+            registry.persist(task);
+            ToolExecutionContext context = ToolExecutionContext.subagentVerifier(
+                    target.cwd(),
+                    target.cwd(),
+                    task.agentId(),
+                    task.batchId(),
+                    invocation.targetAgentId()
+            );
+            QueryEngine.QueryResult queryResult = query(
+                    invocation.prompt(),
+                    verifierTools(),
+                    context,
+                    task.cancellationToken()
+            );
+            registry.appendLog(task.agentId(), queryResult.finalResponse() + System.lineSeparator());
+            if (queryResult.stopReason() == QueryEngine.QueryResult.StopReason.USER_CANCELLED || task.cancellationToken().isCancelled()) {
+                task.cancel();
+                registry.persist(task);
+                return;
+            }
+            AgentResult result = AgentResultParser.parseGeneric(
+                    AgentDefinition.VERIFIER,
+                    task.agentId(),
+                    task.batchId(),
+                    task.unitId(),
+                    queryResult.finalResponse(),
+                    target.cwd()
+            );
+            if (result.status() == AgentResult.Status.SUCCESS) {
+                task.markSuccess("", result.resultSummary(), result.testSummary(), result.verdict());
+            } else {
+                task.markFailed(result.failureReason());
+            }
+            registry.persist(task);
+        } catch (Exception e) {
+            task.markFailed(e.getMessage());
+            registry.appendLog(task.agentId(), "ERROR: " + e.getMessage() + System.lineSeparator());
+            registry.persist(task);
+        }
+    }
+
+    private QueryEngine.QueryResult query(
+            String prompt,
+            List<Tool> selectedTools,
+            ToolExecutionContext context,
+            CancellationToken cancellationToken
+    ) {
+        QueryEngine queryEngine = new QueryEngine(
+                llmClient,
+                selectedTools,
+                maxIterations,
+                new ToolPermissionManager(context.permissionMode()),
+                PreToolUseHandler.none(),
+                StopHookHandler.none(),
+                null,
+                null,
+                skillStore,
+                context
+        );
+        return queryEngine.query(prompt, new WorkingMemory(), cancellationToken);
+    }
+
     private List<Tool> readOnlyTools() {
         return tools.stream()
-                .filter(tool -> PLANNER_TOOLS.contains(tool.name()))
+                .filter(tool -> READ_ONLY_TOOLS.contains(tool.name()))
+                .sorted(Comparator.comparingInt(tool -> toolOrder(tool.name())))
                 .toList();
+    }
+
+    private List<Tool> verifierTools() {
+        return tools.stream()
+                .filter(tool -> VERIFIER_TOOLS.contains(tool.name()))
+                .sorted(Comparator.comparingInt(tool -> toolOrder(tool.name())))
+                .toList();
+    }
+
+    private VerifierTarget verifierTarget(AgentInvocation invocation, BackgroundTaskRegistry registry) {
+        if (invocation.targetAgentId().isBlank()) {
+            return new VerifierTarget(projectRoot);
+        }
+        if (registry == null) {
+            throw new IllegalArgumentException("target_agent_id requires background task registry");
+        }
+        BackgroundAgentTask.Snapshot target = registry.find(invocation.targetAgentId())
+                .map(BackgroundAgentTask::snapshot)
+                .orElseThrow(() -> new IllegalArgumentException("Target agent not found: " + invocation.targetAgentId()));
+        if (!AgentDefinition.CODER.type().equals(target.agentType())) {
+            throw new IllegalArgumentException("target_agent_id must reference a Coder task");
+        }
+        if (target.worktreePath() == null) {
+            throw new IllegalArgumentException("Target Coder has no worktree yet: " + invocation.targetAgentId());
+        }
+        return new VerifierTarget(target.worktreePath());
+    }
+
+    private static int toolOrder(String name) {
+        return switch (name) {
+            case "Read" -> 0;
+            case "Grep" -> 1;
+            case "Glob" -> 2;
+            case "Bash" -> 3;
+            default -> 10;
+        };
+    }
+
+    private static String valueOr(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private record VerifierTarget(Path cwd) {
     }
 }
