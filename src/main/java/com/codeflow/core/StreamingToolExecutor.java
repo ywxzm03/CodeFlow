@@ -351,16 +351,16 @@ public class StreamingToolExecutor {
                 ? "Request interrupted by user"
                 : message;
         for (TrackedTool tool : tools) {
-            if (tool.status == ToolStatus.QUEUED) {
-                tool.result = Tool.ToolExecutionResult.error(cancellationMessage);
-                tool.status = ToolStatus.COMPLETED;
-            } else if (tool.status == ToolStatus.EXECUTING) {
+            if (tool.status == ToolStatus.YIELDED) {
+                continue;
+            }
+            if (tool.status == ToolStatus.EXECUTING) {
                 if (tool.future != null) {
                     tool.future.cancel(true);
                 }
-                tool.result = Tool.ToolExecutionResult.error(cancellationMessage);
-                tool.status = ToolStatus.COMPLETED;
             }
+            tool.result = Tool.ToolExecutionResult.error(cancellationMessage);
+            tool.status = ToolStatus.COMPLETED;
         }
         notifyAll();
     }
