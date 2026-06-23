@@ -70,6 +70,25 @@ class ConversationSessionTest {
     }
 
     @Test
+    void doesNotReflectCancelledResults() {
+        AtomicBoolean reflected = new AtomicBoolean(false);
+        CancellationToken token = CancellationToken.create();
+        QueryEngine queryEngine = queryEngine(
+                new StaticStreamingClient(Flux.<LLMClient.StreamEvent>just(new LLMClient.StreamEvent.TextDelta("partial"))
+                        .doOnNext(ignored -> token.cancel(CancellationToken.USER_CANCEL))),
+                List.of(),
+                3
+        );
+        TestMemoryReflection memoryReflection = new TestMemoryReflection(messages -> reflected.set(true));
+        ConversationSession session = new ConversationSession(queryEngine, memoryReflection, TranscriptRecorder.disabled());
+
+        QueryEngine.QueryResult result = session.handleUserInput("new", token);
+
+        assertEquals(QueryEngine.QueryResult.StopReason.USER_CANCELLED, result.stopReason());
+        assertFalse(reflected.get());
+    }
+
+    @Test
     void clearEmptiesWorkingMemory() {
         ConversationSession session = new ConversationSession(
                 queryEngine(new StaticStreamingClient(), List.of(), 0),

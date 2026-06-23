@@ -27,6 +27,9 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public class QueryEngine {
 
+    static final String INTERRUPT_MESSAGE = "[Request interrupted by user]";
+    static final String INTERRUPT_MESSAGE_FOR_TOOL_USE = "[Request interrupted by user for tool use]";
+
     private static final String SYSTEM_PROMPT = """
             You are CodeFlow, an AI coding assistant.
 
@@ -125,9 +128,14 @@ public class QueryEngine {
      * 主循环：处理用户输入并写入会话级工作记忆。
      */
     public QueryResult query(String userInput, WorkingMemory workingMemory) {
+        return query(userInput, workingMemory, CancellationToken.none());
+    }
+
+    public QueryResult query(String userInput, WorkingMemory workingMemory, CancellationToken cancellationToken) {
         if (workingMemory == null) {
             throw new IllegalArgumentException("workingMemory must not be null");
         }
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
 
         int startIndex = workingMemory.size();
         Message.User userMessage = new Message.User(userInput);
@@ -139,11 +147,15 @@ public class QueryEngine {
 
         while (iteration < maxIterations) {
             iteration++;
+            if (token.isCancelled()) {
+                workingMemory.append(new Message.User(INTERRUPT_MESSAGE));
+                return cancelledResult(INTERRUPT_MESSAGE, workingMemory, turnState, iteration);
+            }
 
             Console.info("\n[Iteration " + iteration + "] 调用LLM...");
 
             // 流式执行模式
-            QueryResult result = executeStreamingIteration(workingMemory, turnState, iteration, stopHookActive);
+            QueryResult result = executeStreamingIteration(workingMemory, turnState, iteration, stopHookActive, token);
             if (result != null) {
                 return result;
             }
@@ -181,9 +193,14 @@ public class QueryEngine {
      * 手动压缩当前工作记忆。
      */
     public CompactResult compact(WorkingMemory workingMemory) {
+        return compact(workingMemory, CancellationToken.none());
+    }
+
+    public CompactResult compact(WorkingMemory workingMemory, CancellationToken cancellationToken) {
         if (workingMemory == null) {
             throw new IllegalArgumentException("workingMemory must not be null");
         }
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
         if (workingMemory.size() == 0) {
             return CompactResult.notNeeded();
         }
@@ -193,16 +210,21 @@ public class QueryEngine {
 
         int beforeMessages = workingMemory.size();
         try {
+            token.throwIfCancelled();
             com.codeflow.compact.AutoCompactor.ForceResult result = compactionManager.forceAutoCompact(
                     systemPrompt(),
                     workingMemory,
-                    tools
+                    tools,
+                    token
             );
+            token.throwIfCancelled();
             return switch (result.status()) {
                 case COMPACTED -> CompactResult.compacted(beforeMessages, workingMemory.size());
                 case NOT_NEEDED -> CompactResult.notNeeded();
                 case UNAVAILABLE -> CompactResult.unavailable(result.reason());
             };
+        } catch (UserCancelledException e) {
+            return CompactResult.cancelled();
         } catch (RuntimeException e) {
             return CompactResult.failed(e.getMessage());
         }
@@ -215,14 +237,15 @@ public class QueryEngine {
             WorkingMemory workingMemory,
             TurnState turnState,
             int iteration,
-            boolean stopHookActive
+            boolean stopHookActive,
+            CancellationToken cancellationToken
     ) {
         String systemPrompt = systemPrompt();
         if (compactionManager != null) {
-            compactionManager.beforeModelCall(systemPrompt, workingMemory, tools);
+            compactionManager.beforeModelCall(systemPrompt, workingMemory, tools, cancellationToken);
         }
 
-        return executeStreamingAttempt(workingMemory, turnState, iteration, systemPrompt, true, stopHookActive);
+        return executeStreamingAttempt(workingMemory, turnState, iteration, systemPrompt, true, stopHookActive, cancellationToken);
     }
 
     private QueryResult executeStreamingAttempt(
@@ -231,10 +254,12 @@ public class QueryEngine {
             int iteration,
             String systemPrompt,
             boolean allowReactiveRetry,
-            boolean stopHookActive
+            boolean stopHookActive,
+            CancellationToken cancellationToken
     ) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
         // 创建流式工具执行器
-        StreamingToolExecutor executor = new StreamingToolExecutor(tools, toolPermissionManager, preToolUseHandler);
+        StreamingToolExecutor executor = new StreamingToolExecutor(tools, toolPermissionManager, preToolUseHandler, token);
         try {
             StringBuilder contentBuilder = new StringBuilder();
             List<Message.ToolUse> allToolUses = new ArrayList<>();
@@ -242,8 +267,9 @@ public class QueryEngine {
 
 
             try {
-                llmClient.callStreaming(systemPrompt, workingMemory.snapshot(), tools)
+                llmClient.callStreaming(systemPrompt, workingMemory.snapshot(), tools, token)
                         .doOnNext(event -> {
+                            token.throwIfCancelled();
                             switch (event) {
                                 case LLMClient.StreamEvent.TextDelta delta -> contentBuilder.append(delta.text());
                                 case LLMClient.StreamEvent.ToolUse toolUse -> {
@@ -257,6 +283,17 @@ public class QueryEngine {
                         })
                         .blockLast();
             } catch (RuntimeException streamError) {
+                if (isUserCancelled(streamError) || token.isCancelled()) {
+                    return handleUserCancelledDuringStreaming(
+                            workingMemory,
+                            turnState,
+                            iteration,
+                            contentBuilder.toString(),
+                            allToolUses,
+                            usage.get(),
+                            executor
+                    );
+                }
                 if (allowReactiveRetry && compactionManager != null) {
                     executor.discard();
                     CompactionManager.ReactiveResult reactiveResult = compactionManager.reactiveCompact(
@@ -264,11 +301,12 @@ public class QueryEngine {
                             workingMemory,
                             tools,
                             streamError,
-                            1
+                            1,
+                            token
                     );
                     if (reactiveResult.compacted()) {
                         Console.warn("\n[Compact] 上下文超限，已触发 reactive compact 并重试本轮模型调用");
-                        return executeStreamingAttempt(workingMemory, turnState, iteration, systemPrompt, false, stopHookActive);
+                        return executeStreamingAttempt(workingMemory, turnState, iteration, systemPrompt, false, stopHookActive, token);
                     }
                 }
                 // 流式中断：取消已启动的工具，丢弃本轮所有副作用，不写入半截消息
@@ -292,6 +330,13 @@ public class QueryEngine {
             // 先添加 assistant 消息（含全部 tool_use），保证 tool result 跟在它之后
             workingMemory.append(new Message.Assistant(content, allToolUses, usage.get()));
 
+            if (token.isCancelled()) {
+                executor.cancel("Request interrupted by user");
+                appendToolResultsInOrder(workingMemory, allToolUses, executor.getRemainingResults(), "Request interrupted by user");
+                workingMemory.append(new Message.User(allToolUses.isEmpty() ? INTERRUPT_MESSAGE : INTERRUPT_MESSAGE_FOR_TOOL_USE));
+                return cancelledResult(allToolUses.isEmpty() ? INTERRUPT_MESSAGE : INTERRUPT_MESSAGE_FOR_TOOL_USE, workingMemory, turnState, iteration);
+            }
+
             // 没有工具调用 -> 对话结束
             if (allToolUses.isEmpty()) {
                 StopHookResult stopHookResult = runStopHook(content, stopHookActive, workingMemory.snapshot());
@@ -311,20 +356,13 @@ public class QueryEngine {
 
             // 等待所有工具完成，按 tool_use 的原始顺序回填结果
             Console.info("\n[等待] 等待工具完成...");
-            Map<String, StreamingToolExecutor.ToolResult> resultsById = new HashMap<>();
-            for (StreamingToolExecutor.ToolResult result : executor.getRemainingResults()) {
-                resultsById.put(result.toolUseId(), result);
+            if (token.isCancelled()) {
+                executor.cancel("Request interrupted by user");
             }
-            for (Message.ToolUse tu : allToolUses) {
-                StreamingToolExecutor.ToolResult result = resultsById.get(tu.id());
-                if (result != null) {
-                    workingMemory.append(new Message.ToolResult(result.toolUseId(), result.content(), result.isError()));
-                    if (!result.isError() && SkillTool.TOOL_NAME.equals(result.toolName())) {
-                        findSkillTool()
-                                .flatMap(tool -> tool.renderInvocation(result.input(), "model"))
-                                .ifPresent(renderedSkill -> workingMemory.append(new Message.User(renderedSkill)));
-                    }
-                }
+            appendToolResultsInOrder(workingMemory, allToolUses, executor.getRemainingResults(), "Request interrupted by user");
+            if (token.isCancelled()) {
+                workingMemory.append(new Message.User(INTERRUPT_MESSAGE_FOR_TOOL_USE));
+                return cancelledResult(INTERRUPT_MESSAGE_FOR_TOOL_USE, workingMemory, turnState, iteration);
             }
 
             // 继续下一轮
@@ -333,6 +371,70 @@ public class QueryEngine {
         } finally {
             executor.shutdown();
         }
+    }
+
+    private QueryResult handleUserCancelledDuringStreaming(
+            WorkingMemory workingMemory,
+            TurnState turnState,
+            int iteration,
+            String content,
+            List<Message.ToolUse> allToolUses,
+            Message.Usage usage,
+            StreamingToolExecutor executor
+    ) {
+        executor.cancel("Request interrupted by user");
+        if (!content.isEmpty() || !allToolUses.isEmpty()) {
+            workingMemory.append(new Message.Assistant(content, allToolUses, usage));
+            appendToolResultsInOrder(workingMemory, allToolUses, executor.getRemainingResults(), "Request interrupted by user");
+        }
+        workingMemory.append(new Message.User(INTERRUPT_MESSAGE));
+        return cancelledResult(INTERRUPT_MESSAGE, workingMemory, turnState, iteration);
+    }
+
+    private void appendToolResultsInOrder(
+            WorkingMemory workingMemory,
+            List<Message.ToolUse> toolUses,
+            List<StreamingToolExecutor.ToolResult> results,
+            String missingResultMessage
+    ) {
+        Map<String, StreamingToolExecutor.ToolResult> resultsById = new HashMap<>();
+        for (StreamingToolExecutor.ToolResult result : results) {
+            resultsById.put(result.toolUseId(), result);
+        }
+        for (Message.ToolUse tu : toolUses) {
+            StreamingToolExecutor.ToolResult result = resultsById.get(tu.id());
+            if (result == null) {
+                workingMemory.append(new Message.ToolResult(tu.id(), missingResultMessage, true));
+                continue;
+            }
+            workingMemory.append(new Message.ToolResult(result.toolUseId(), result.content(), result.isError()));
+            if (!result.isError() && SkillTool.TOOL_NAME.equals(result.toolName())) {
+                findSkillTool()
+                        .flatMap(tool -> tool.renderInvocation(result.input(), "model"))
+                        .ifPresent(renderedSkill -> workingMemory.append(new Message.User(renderedSkill)));
+            }
+        }
+    }
+
+    private QueryResult cancelledResult(String finalResponse, WorkingMemory workingMemory, TurnState turnState, int iteration) {
+        return new QueryResult(
+                finalResponse,
+                workingMemory.snapshot(),
+                sliceCurrentTurn(workingMemory, turnState),
+                iteration,
+                QueryResult.StopReason.USER_CANCELLED
+        );
+    }
+
+    private boolean isUserCancelled(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof UserCancelledException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private StopHookResult runStopHook(String lastAssistantMessage, boolean stopHookActive, List<Message> messages) {
@@ -403,6 +505,7 @@ public class QueryEngine {
         public enum StopReason {
             COMPLETED,
             MAX_ITERATIONS,
+            USER_CANCELLED,
             ERROR
         }
     }
@@ -427,10 +530,15 @@ public class QueryEngine {
             return new CompactResult(Status.FAILED, 0, 0, reason);
         }
 
+        public static CompactResult cancelled() {
+            return new CompactResult(Status.CANCELLED, 0, 0, "cancelled by user");
+        }
+
         public enum Status {
             COMPACTED,
             NOT_NEEDED,
             UNAVAILABLE,
+            CANCELLED,
             FAILED
         }
     }

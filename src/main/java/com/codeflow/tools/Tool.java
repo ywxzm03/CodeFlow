@@ -1,5 +1,7 @@
 package com.codeflow.tools;
 
+import com.codeflow.core.CancellationToken;
+
 /**
  * 工具接口 - 所有工具必须实现此接口
  */
@@ -27,6 +29,14 @@ public interface Tool {
      * @return 工具执行结果
      */
     ToolExecutionResult execute(String input);
+
+    default ToolExecutionResult execute(String input, CancellationToken cancellationToken) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
+        token.throwIfCancelled();
+        ToolExecutionResult result = execute(input);
+        token.throwIfCancelled();
+        return result;
+    }
 
     /**
      * 校验工具输入参数是否合法。

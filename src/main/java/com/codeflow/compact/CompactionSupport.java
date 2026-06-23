@@ -1,6 +1,7 @@
 package com.codeflow.compact;
 
 import com.codeflow.core.Message;
+import com.codeflow.core.CancellationToken;
 import com.codeflow.core.WorkingMemory;
 import com.codeflow.llm.LLMClient;
 import com.codeflow.memory.TranscriptRecord;
@@ -76,8 +77,41 @@ final class CompactionSupport {
             boolean keepKeywordMessages,
             boolean requireNonEmptyCold
     ) {
+        return applyCompaction(
+                workingMemory,
+                recorder,
+                store,
+                llmClient,
+                mode,
+                reason,
+                estimatedTokensBefore,
+                hotMessageCount,
+                retryCount,
+                keepKeywordMessages,
+                requireNonEmptyCold,
+                CancellationToken.none()
+        );
+    }
+
+    static CompactionOutcome applyCompaction(
+            WorkingMemory workingMemory,
+            TranscriptRecorder recorder,
+            TranscriptStore store,
+            LLMClient llmClient,
+            String mode,
+            String reason,
+            long estimatedTokensBefore,
+            int hotMessageCount,
+            int retryCount,
+            boolean keepKeywordMessages,
+            boolean requireNonEmptyCold,
+            CancellationToken cancellationToken
+    ) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
+        token.throwIfCancelled();
         // 保证压缩前完整 L4（含 preserved 原文）已写入 L5。
         recorder.recordUnpersisted(workingMemory);
+        token.throwIfCancelled();
 
         List<WorkingMemory.Entry> beforeEntries = workingMemory.snapshotEntries();
         if (beforeEntries.isEmpty()) {
@@ -110,7 +144,8 @@ final class CompactionSupport {
             }
         }
 
-        String summaryContent = summaryContent(summarize(llmClient, cold), recorder.transcriptPath());
+        String summaryContent = summaryContent(summarize(llmClient, cold, token), recorder.transcriptPath());
+        token.throwIfCancelled();
         List<String> preservedUuids = preservedEntries.stream().map(WorkingMemory.Entry::transcriptUuid).toList();
         TranscriptRecord.CompactBoundary boundary = new TranscriptRecord.CompactBoundary(
                 mode,
@@ -144,6 +179,12 @@ final class CompactionSupport {
      * 用模型把冷数据压成摘要。
      */
     static String summarize(LLMClient llmClient, List<Message> cold) {
+        return summarize(llmClient, cold, CancellationToken.none());
+    }
+
+    static String summarize(LLMClient llmClient, List<Message> cold, CancellationToken cancellationToken) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
+        token.throwIfCancelled();
         if (cold == null || cold.isEmpty()) {
             return "No older cold messages needed summarization.";
         }
@@ -152,7 +193,7 @@ final class CompactionSupport {
         for (Message message : cold) {
             prompt.append(formatMessage(message)).append("\n\n");
         }
-        return llmClient.call(SYSTEM_PROMPT, List.of(new Message.User(prompt.toString())), List.of()).content();
+        return llmClient.call(SYSTEM_PROMPT, List.of(new Message.User(prompt.toString())), List.of(), token).content();
     }
 
     static String summaryContent(String summary, String transcriptPath) {

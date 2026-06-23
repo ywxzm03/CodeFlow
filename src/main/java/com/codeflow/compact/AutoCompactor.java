@@ -1,6 +1,7 @@
 package com.codeflow.compact;
 
 import com.codeflow.core.WorkingMemory;
+import com.codeflow.core.CancellationToken;
 import com.codeflow.llm.LLMClient;
 import com.codeflow.memory.TranscriptRecorder;
 import com.codeflow.memory.TranscriptStore;
@@ -34,6 +35,18 @@ public final class AutoCompactor {
     }
 
     public Result compactIfNeeded(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools, long tokensFreed) {
+        return compactIfNeeded(systemPrompt, workingMemory, tools, tokensFreed, CancellationToken.none());
+    }
+
+    public Result compactIfNeeded(
+            String systemPrompt,
+            WorkingMemory workingMemory,
+            List<Tool> tools,
+            long tokensFreed,
+            CancellationToken cancellationToken
+    ) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
+        token.throwIfCancelled();
         if (!policy.enabled() || workingMemory == null || !transcriptRecorder.enabled() || transcriptStore == null) {
             return Result.notCompacted();
         }
@@ -43,13 +56,24 @@ public final class AutoCompactor {
         if (estimatedTokens < policy.autoCompactThresholdTokens()) {
             return Result.notCompacted();
         }
-        return compact(workingMemory, estimatedTokens, "token_threshold");
+        return compact(workingMemory, estimatedTokens, "token_threshold", token);
     }
 
     /**
      * 手动触发 auto compact，不检查 token 阈值。
      */
     public ForceResult forceCompact(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools) {
+        return forceCompact(systemPrompt, workingMemory, tools, CancellationToken.none());
+    }
+
+    public ForceResult forceCompact(
+            String systemPrompt,
+            WorkingMemory workingMemory,
+            List<Tool> tools,
+            CancellationToken cancellationToken
+    ) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
+        token.throwIfCancelled();
         if (!policy.enabled()) {
             return ForceResult.unavailable("compaction is disabled");
         }
@@ -64,7 +88,7 @@ public final class AutoCompactor {
         }
 
         long estimatedTokens = tokenEstimator.estimate(systemPrompt, workingMemory.snapshot(), tools);
-        Result result = compact(workingMemory, estimatedTokens, "manual_command");
+        Result result = compact(workingMemory, estimatedTokens, "manual_command", token);
         if (result.ioFailed()) {
             return ForceResult.unavailable("transcript 写入失败");
         }
@@ -74,7 +98,12 @@ public final class AutoCompactor {
         return ForceResult.compacted(result.boundaryUuid(), result.messageCount());
     }
 
-    private Result compact(WorkingMemory workingMemory, long estimatedTokensBefore, String reason) {
+    private Result compact(
+            WorkingMemory workingMemory,
+            long estimatedTokensBefore,
+            String reason,
+            CancellationToken cancellationToken
+    ) {
         // auto：保留关键消息 + 热消息；冷数据为空则不压缩。
         CompactionSupport.CompactionOutcome outcome = CompactionSupport.applyCompaction(
                 workingMemory,
@@ -87,7 +116,8 @@ public final class AutoCompactor {
                 policy.autoCompactHotMessages(),
                 0,
                 true,
-                true
+                true,
+                cancellationToken
         );
         return new Result(outcome.compacted(), outcome.boundaryUuid(), outcome.messageCount(), outcome.ioFailed());
     }

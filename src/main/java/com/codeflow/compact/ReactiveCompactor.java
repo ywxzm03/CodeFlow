@@ -1,6 +1,7 @@
 package com.codeflow.compact;
 
 import com.codeflow.core.WorkingMemory;
+import com.codeflow.core.CancellationToken;
 import com.codeflow.llm.LLMClient;
 import com.codeflow.memory.TranscriptRecorder;
 import com.codeflow.memory.TranscriptStore;
@@ -34,6 +35,18 @@ public final class ReactiveCompactor {
     }
 
     public Result compact(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools, int retryCount) {
+        return compact(systemPrompt, workingMemory, tools, retryCount, CancellationToken.none());
+    }
+
+    public Result compact(
+            String systemPrompt,
+            WorkingMemory workingMemory,
+            List<Tool> tools,
+            int retryCount,
+            CancellationToken cancellationToken
+    ) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
+        token.throwIfCancelled();
         if (!policy.enabled() || workingMemory == null || !transcriptRecorder.enabled() || transcriptStore == null) {
             return Result.notCompacted();
         }
@@ -54,7 +67,8 @@ public final class ReactiveCompactor {
                 policy.reactiveCompactHotMessages(),
                 retryCount,
                 false,
-                false
+                false,
+                token
         );
         return new Result(outcome.compacted(), outcome.boundaryUuid(), outcome.messageCount());
     }

@@ -1,6 +1,7 @@
 package com.codeflow.routing;
 
 import com.codeflow.core.Message;
+import com.codeflow.core.UserCancelledException;
 import com.codeflow.llm.LLMClient;
 import com.codeflow.tools.Tool;
 import org.junit.jupiter.api.Test;
@@ -50,6 +51,31 @@ class RoutingLLMClientTest {
         assertEquals(error, thrown);
         assertEquals(List.of("model-a"), delegate.syncCalls);
         assertEquals("A", client.activeModelKey());
+    }
+
+    @Test
+    void userCancellationDoesNotFallbackOrMarkUnhealthy() {
+        FakeClient delegate = new FakeClient();
+        delegate.syncFailures("model-a", new UserCancelledException("user-cancel"));
+        ModelHealthRegistry health = new ModelHealthRegistry(Duration.ofSeconds(300));
+        RecordingListener listener = new RecordingListener();
+        RoutingLLMClient client = new RoutingLLMClient(
+                delegate,
+                models(),
+                "A",
+                new FallbackPolicy(true, Duration.ofSeconds(300)),
+                health,
+                listener
+        );
+
+        assertThrows(UserCancelledException.class, () -> client.call("system", List.of(), List.of()));
+
+        assertEquals(List.of("model-a"), delegate.syncCalls);
+        assertEquals("A", client.activeModelKey());
+        assertEquals(ModelHealthStatus.UNKNOWN, health.health("A").status());
+        assertTrue(listener.exceptions.isEmpty());
+        assertTrue(listener.switches.isEmpty());
+        assertTrue(listener.allFailed.isEmpty());
     }
 
     @Test
@@ -265,6 +291,7 @@ class RoutingLLMClientTest {
     private static final class RecordingListener implements RoutingEventListener {
         private final List<RoutingEvents.BeforeModelCall> beforeCalls = new ArrayList<>();
         private final List<RoutingEvents.AfterModelSuccess> successes = new ArrayList<>();
+        private final List<RoutingEvents.AfterModelException> exceptions = new ArrayList<>();
         private final List<RoutingEvents.BeforeFallbackSwitch> switches = new ArrayList<>();
         private final List<RoutingEvents.AfterAllCandidatesFailed> allFailed = new ArrayList<>();
 
@@ -276,6 +303,11 @@ class RoutingLLMClientTest {
         @Override
         public void afterModelSuccess(RoutingEvents.AfterModelSuccess event) {
             successes.add(event);
+        }
+
+        @Override
+        public void afterModelException(RoutingEvents.AfterModelException event) {
+            exceptions.add(event);
         }
 
         @Override

@@ -1,5 +1,7 @@
 package com.codeflow.tools;
 
+import com.codeflow.core.CancellationToken;
+import com.codeflow.core.UserCancelledException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -51,8 +53,15 @@ public class BashTool implements Tool {
 
     @Override
     public ToolExecutionResult execute(String input) {
+        return execute(input, CancellationToken.none());
+    }
+
+    @Override
+    public ToolExecutionResult execute(String input, CancellationToken cancellationToken) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
         Process process = null;
         try {
+            token.throwIfCancelled();
             // 解析输入
             JsonNode inputNode = objectMapper.readTree(input);
             String command = inputNode.get("command").asText();
@@ -62,6 +71,8 @@ public class BashTool implements Tool {
             processBuilder.redirectErrorStream(true);
 
             process = processBuilder.start();
+            Process runningProcess = process;
+            token.onCancel(runningProcess::destroyForcibly);
 
             // 读取输出
             StringBuilder output = new StringBuilder();
@@ -69,6 +80,7 @@ public class BashTool implements Tool {
                     new InputStreamReader(process.getInputStream()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
+                    token.throwIfCancelled();
                     // 响应中断（如 sibling Bash 失败触发的取消）：销毁子进程并退出
                     if (Thread.currentThread().isInterrupted()) {
                         process.destroyForcibly();
@@ -79,7 +91,9 @@ public class BashTool implements Tool {
             }
 
             // 等待命令完成
+            token.throwIfCancelled();
             boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            token.throwIfCancelled();
 
             if (!finished) {
                 process.destroyForcibly();
@@ -100,6 +114,11 @@ public class BashTool implements Tool {
 
             return ToolExecutionResult.success(result);
 
+        } catch (UserCancelledException e) {
+            if (process != null) {
+                process.destroyForcibly();
+            }
+            return ToolExecutionResult.error("Request interrupted by user");
         } catch (InterruptedException e) {
             // waitFor 被中断：销毁子进程，恢复中断状态
             if (process != null) {

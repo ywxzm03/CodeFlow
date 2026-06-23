@@ -281,6 +281,60 @@ class QueryEngineWorkingMemoryTest {
     }
 
     @Test
+    void streamingCancellationKeepsPartialAssistantAndInterruptMarker() {
+        CancellationToken token = CancellationToken.create();
+        QueryEngine queryEngine = queryEngine(
+                new RecordingStreamingClient(Flux.concat(
+                        Flux.just(new LLMClient.StreamEvent.TextDelta("partial")),
+                        Flux.error(new UserCancelledException(CancellationToken.USER_CANCEL))
+                )),
+                List.of(),
+                3
+        );
+        WorkingMemory memory = new WorkingMemory();
+
+        QueryEngine.QueryResult result = queryEngine.query("new", memory, token);
+
+        assertEquals(QueryEngine.QueryResult.StopReason.USER_CANCELLED, result.stopReason());
+        assertEquals(
+                List.of(
+                        new Message.User("new"),
+                        new Message.Assistant("partial", List.of(), null),
+                        new Message.User(QueryEngine.INTERRUPT_MESSAGE)
+                ),
+                memory.snapshot()
+        );
+    }
+
+    @Test
+    void streamingCancellationAddsMissingToolResult() {
+        CancellationToken token = CancellationToken.create();
+        QueryEngine queryEngine = queryEngine(
+                new RecordingStreamingClient(Flux.concat(
+                        Flux.just(new LLMClient.StreamEvent.ToolUse(new Message.ToolUse("toolu_cancel", "TestTool", "{}"))),
+                        Flux.error(new UserCancelledException(CancellationToken.USER_CANCEL))
+                )),
+                List.of(testTool()),
+                3,
+                new ToolPermissionConfig(Map.of("TestTool", ToolPermission.ALLOW))
+        );
+        WorkingMemory memory = new WorkingMemory();
+
+        QueryEngine.QueryResult result = queryEngine.query("new", memory, token);
+
+        assertEquals(QueryEngine.QueryResult.StopReason.USER_CANCELLED, result.stopReason());
+        assertTrue(memory.snapshot().stream().anyMatch(message ->
+                message instanceof Message.ToolResult toolResult
+                        && "toolu_cancel".equals(toolResult.toolUseId())
+                        && toolResult.isError()
+        ));
+        assertTrue(memory.snapshot().stream().anyMatch(message ->
+                message instanceof Message.User user
+                        && QueryEngine.INTERRUPT_MESSAGE.equals(user.content())
+        ));
+    }
+
+    @Test
     void contextOverflowTriggersReactiveCompactAndRetries() throws Exception {
         TranscriptStore store = new TranscriptStore(tempDir.resolve("memory/L5"));
         store.initialize();

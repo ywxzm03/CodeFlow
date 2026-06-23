@@ -23,6 +23,8 @@ import com.anthropic.models.messages.Tool;
 import com.anthropic.models.messages.ToolResultBlockParam;
 import com.anthropic.models.messages.ToolUseBlock;
 import com.anthropic.models.messages.ToolUseBlockParam;
+import com.codeflow.core.CancellationToken;
+import com.codeflow.core.UserCancelledException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -86,21 +88,47 @@ public class AnthropicClient implements LLMClient {
 
     @Override
     public Flux<StreamEvent> callStreaming(String systemPrompt, List<com.codeflow.core.Message> messages, List<com.codeflow.tools.Tool> tools) {
+        return callStreaming(systemPrompt, messages, tools, CancellationToken.none());
+    }
+
+    @Override
+    public Flux<StreamEvent> callStreaming(
+            String systemPrompt,
+            List<com.codeflow.core.Message> messages,
+            List<com.codeflow.tools.Tool> tools,
+            CancellationToken cancellationToken
+    ) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
         MessageCreateParams params = buildParams(systemPrompt, messages, tools);
         return Flux.create(sink -> {
+            token.throwIfCancelled();
             StreamResponse<RawMessageStreamEvent> streamResponse = client.messages().createStreaming(params);
             // 按 content block 索引累积状态（文本块的类型、工具块的 id/name/分片参数）
             Map<Long, BlockAccumulator> contentBlocks = new LinkedHashMap<>();
             UsageAccumulator usage = new UsageAccumulator();
             sink.onDispose(streamResponse::close);
+            token.onCancel(() -> {
+                streamResponse.close();
+                sink.error(new UserCancelledException(token.reason()));
+            });
 
             try {
                 // Reactor push 模式：过滤 raw event、累积 block 状态、可产出时直接 sink.next(...)。
                 // 不再需要 pending/fill，因为没有 Iterator.hasNext() 的预取语义。
-                streamResponse.stream().forEach(event -> processStreamEvent(event, contentBlocks, usage, sink));
+                streamResponse.stream().forEach(event -> {
+                    token.throwIfCancelled();
+                    processStreamEvent(event, contentBlocks, usage, sink);
+                });
+                token.throwIfCancelled();
                 sink.complete();
-            } catch (RuntimeException e) {
+            } catch (UserCancelledException e) {
                 sink.error(e);
+            } catch (RuntimeException e) {
+                if (token.isCancelled()) {
+                    sink.error(new UserCancelledException(token.reason()));
+                } else {
+                    sink.error(e);
+                }
             } finally {
                 streamResponse.close();
             }

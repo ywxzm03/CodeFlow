@@ -1,6 +1,7 @@
 package com.codeflow.llm;
 
 import com.codeflow.core.Message;
+import com.codeflow.core.CancellationToken;
 import com.codeflow.tools.Tool;
 import reactor.core.publisher.Flux;
 
@@ -21,6 +22,14 @@ public interface LLMClient {
      */
     LLMResponse call(String systemPrompt, List<Message> messages, List<Tool> tools);
 
+    default LLMResponse call(String systemPrompt, List<Message> messages, List<Tool> tools, CancellationToken cancellationToken) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
+        token.throwIfCancelled();
+        LLMResponse response = call(systemPrompt, messages, tools);
+        token.throwIfCancelled();
+        return response;
+    }
+
     /**
      * 调用LLM（流式方式）
      *
@@ -33,6 +42,13 @@ public interface LLMClient {
      * @return 流式事件序列
      */
     Flux<StreamEvent> callStreaming(String systemPrompt, List<Message> messages, List<Tool> tools);
+
+    default Flux<StreamEvent> callStreaming(String systemPrompt, List<Message> messages, List<Tool> tools, CancellationToken cancellationToken) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
+        return callStreaming(systemPrompt, messages, tools)
+                .doOnSubscribe(subscription -> token.throwIfCancelled())
+                .doOnNext(ignored -> token.throwIfCancelled());
+    }
 
     /**
      * 切换后续请求使用的模型。

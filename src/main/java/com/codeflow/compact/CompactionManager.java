@@ -1,6 +1,7 @@
 package com.codeflow.compact;
 
 import com.codeflow.core.WorkingMemory;
+import com.codeflow.core.CancellationToken;
 import com.codeflow.tools.Tool;
 
 import java.util.List;
@@ -24,13 +25,20 @@ public final class CompactionManager {
      * 模型调用前：先 snip，再按阈值 auto。
      */
     public BeforeCallResult beforeModelCall(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools) {
+        return beforeModelCall(systemPrompt, workingMemory, tools, CancellationToken.none());
+    }
+
+    public BeforeCallResult beforeModelCall(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools, CancellationToken cancellationToken) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
+        token.throwIfCancelled();
         long tokensFreed = 0;
         if (snipCompactor != null) {
             tokensFreed = snipCompactor.compact(workingMemory).tokensFreed();
         }
+        token.throwIfCancelled();
         AutoCompactor.Result autoResult = autoCompactor == null
                 ? AutoCompactor.Result.notCompacted()
-                : autoCompactor.compactIfNeeded(systemPrompt, workingMemory, tools, tokensFreed);
+                : autoCompactor.compactIfNeeded(systemPrompt, workingMemory, tools, tokensFreed, token);
         return new BeforeCallResult(tokensFreed, autoResult.compacted());
     }
 
@@ -38,20 +46,37 @@ public final class CompactionManager {
      * 手动触发 auto compact。
      */
     public AutoCompactor.ForceResult forceAutoCompact(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools) {
+        return forceAutoCompact(systemPrompt, workingMemory, tools, CancellationToken.none());
+    }
+
+    public AutoCompactor.ForceResult forceAutoCompact(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools, CancellationToken cancellationToken) {
         if (autoCompactor == null) {
             return AutoCompactor.ForceResult.unavailable("auto compact is unavailable");
         }
-        return autoCompactor.forceCompact(systemPrompt, workingMemory, tools);
+        return autoCompactor.forceCompact(systemPrompt, workingMemory, tools, cancellationToken);
     }
 
     /**
      * 上下文超限后触发兜底压缩。
      */
     public ReactiveResult reactiveCompact(String systemPrompt, WorkingMemory workingMemory, List<Tool> tools, RuntimeException error, int retryCount) {
+        return reactiveCompact(systemPrompt, workingMemory, tools, error, retryCount, CancellationToken.none());
+    }
+
+    public ReactiveResult reactiveCompact(
+            String systemPrompt,
+            WorkingMemory workingMemory,
+            List<Tool> tools,
+            RuntimeException error,
+            int retryCount,
+            CancellationToken cancellationToken
+    ) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
+        token.throwIfCancelled();
         if (!isContextOverflow(error) || reactiveCompactor == null) {
             return ReactiveResult.notCompacted();
         }
-        ReactiveCompactor.Result result = reactiveCompactor.compact(systemPrompt, workingMemory, tools, retryCount);
+        ReactiveCompactor.Result result = reactiveCompactor.compact(systemPrompt, workingMemory, tools, retryCount, token);
         return new ReactiveResult(result.compacted(), result.boundaryUuid());
     }
 

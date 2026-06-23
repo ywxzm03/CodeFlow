@@ -144,6 +144,27 @@ class StreamingToolPermissionTest {
         assertTrue(results.getFirst().content().contains("工具未获得用户确认: TestTool"));
     }
 
+    @Test
+    void cancellationReturnsSyntheticErrorForQueuedTool() {
+        CancellationToken token = CancellationToken.create();
+        AtomicBoolean executed = new AtomicBoolean(false);
+        StreamingToolExecutor executor = new StreamingToolExecutor(
+                List.of(testTool(executed)),
+                new ToolPermissionManager(PermissionMode.FULL_ACCESS),
+                input -> PreToolUseResult.none(),
+                token
+        );
+
+        token.cancel(CancellationToken.USER_CANCEL);
+        executor.addTool(new Message.ToolUse("toolu_cancel", "TestTool", "{}"));
+        List<StreamingToolExecutor.ToolResult> results = executor.getRemainingResults();
+        executor.shutdown();
+
+        assertFalse(executed.get());
+        assertTrue(results.getFirst().isError());
+        assertTrue(results.getFirst().content().contains("Request interrupted by user"));
+    }
+
     private Tool testTool(AtomicBoolean executed) {
         return new Tool() {
             @Override

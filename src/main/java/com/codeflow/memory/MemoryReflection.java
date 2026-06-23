@@ -1,6 +1,8 @@
 package com.codeflow.memory;
 
 import com.codeflow.core.Message;
+import com.codeflow.core.CancellationToken;
+import com.codeflow.core.UserCancelledException;
 import com.codeflow.llm.LLMClient;
 import com.codeflow.util.Console;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -57,18 +59,27 @@ public class MemoryReflection {
     }
 
     public void reflect(List<Message> messages) {
+        reflect(messages, CancellationToken.none());
+    }
+
+    public void reflect(List<Message> messages, CancellationToken cancellationToken) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
         if (llmClient == null || memoryStore == null || messages == null || messages.isEmpty()) {
             return;
         }
 
         try {
+            token.throwIfCancelled();
             String prompt = buildReflectionPrompt(messages);
-            LLMClient.LLMResponse response = llmClient.call(SYSTEM_PROMPT, List.of(new Message.User(prompt)), List.of());
+            LLMClient.LLMResponse response = llmClient.call(SYSTEM_PROMPT, List.of(new Message.User(prompt)), List.of(), token);
+            token.throwIfCancelled();
             List<MemoryUpdate> updates = parseUpdates(response.content());
             for (MemoryUpdate update : updates) {
+                token.throwIfCancelled();
                 if (!confirmer.confirm(update)) {
                     continue;
                 }
+                token.throwIfCancelled();
                 try {
                     memoryStore.applyUpdate(update);
                     Console.info("[Memory] 已写入: " + update.relativePath());
@@ -76,6 +87,8 @@ public class MemoryReflection {
                     Console.warn("[Memory] 写入失败: " + e.getMessage());
                 }
             }
+        } catch (UserCancelledException ignored) {
+            // User cancellation is an expected terminal action.
         } catch (Exception e) {
             Console.warn("[Memory] 记忆反思失败，已跳过: " + e.getMessage());
         }

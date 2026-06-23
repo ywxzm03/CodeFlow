@@ -1,6 +1,8 @@
 package com.codeflow.routing;
 
 import com.codeflow.core.Message;
+import com.codeflow.core.CancellationToken;
+import com.codeflow.core.UserCancelledException;
 import com.codeflow.llm.LLMClient;
 import com.codeflow.tools.Tool;
 import com.codeflow.util.Console;
@@ -52,12 +54,25 @@ public class RoutingLLMClient implements LLMClient, RoutingStatusProvider {
 
     @Override
     public LLMResponse call(String systemPrompt, List<Message> messages, List<Tool> tools) {
-        return execute(ModelCallType.SYNC, route -> delegate.call(systemPrompt, messages, tools));
+        return call(systemPrompt, messages, tools, CancellationToken.none());
+    }
+
+    @Override
+    public LLMResponse call(String systemPrompt, List<Message> messages, List<Tool> tools, CancellationToken cancellationToken) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
+        return execute(ModelCallType.SYNC, route -> delegate.call(systemPrompt, messages, tools, token));
     }
 
     @Override
     public Flux<StreamEvent> callStreaming(String systemPrompt, List<Message> messages, List<Tool> tools) {
+        return callStreaming(systemPrompt, messages, tools, CancellationToken.none());
+    }
+
+    @Override
+    public Flux<StreamEvent> callStreaming(String systemPrompt, List<Message> messages, List<Tool> tools, CancellationToken cancellationToken) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
         return Flux.defer(() -> {
+            token.throwIfCancelled();
             ModelRoute startingRoute = activeRoute;
             List<ModelRoute> candidates = candidatesFor(startingRoute);
             eventListener.beforeModelCall(new RoutingEvents.BeforeModelCall(
@@ -66,7 +81,7 @@ public class RoutingLLMClient implements LLMClient, RoutingStatusProvider {
                     candidates,
                     healthRegistry.snapshot()
             ));
-            return streamAttempt(systemPrompt, messages, tools, startingRoute, candidates, new ArrayList<>(), false, false);
+            return streamAttempt(systemPrompt, messages, tools, token, startingRoute, candidates, new ArrayList<>(), false, false);
         });
     }
 
@@ -183,15 +198,17 @@ public class RoutingLLMClient implements LLMClient, RoutingStatusProvider {
             String systemPrompt,
             List<Message> messages,
             List<Tool> tools,
+            CancellationToken cancellationToken,
             ModelRoute route,
             List<ModelRoute> candidates,
             List<ModelRoute> attempted,
             boolean retry,
             boolean fallback
     ) {
+        cancellationToken.throwIfCancelled();
         selectRoute(route);
         addAttempted(attempted, route);
-        return delegate.callStreaming(systemPrompt, messages, tools)
+        return delegate.callStreaming(systemPrompt, messages, tools, cancellationToken)
                 .doOnComplete(() -> {
                     healthRegistry.markHealthy(route.key());
                     activateRoute(route);
@@ -202,6 +219,9 @@ public class RoutingLLMClient implements LLMClient, RoutingStatusProvider {
                     ));
                 })
                 .onErrorResume(error -> {
+                    if (isUserCancelled(error)) {
+                        return Flux.error(error);
+                    }
                     FallbackDecision decision = policy.classify(error);
                     eventListener.afterModelException(new RoutingEvents.AfterModelException(
                             ModelCallType.STREAMING,
@@ -215,7 +235,7 @@ public class RoutingLLMClient implements LLMClient, RoutingStatusProvider {
                     }
                     if (!fallback && !retry && policy.retryCurrentModelOnce()) {
                         Console.warn("[Routing] 流式模型调用失败，重试当前模型: " + route.key());
-                        return streamAttempt(systemPrompt, messages, tools, route, candidates, attempted, true, fallback);
+                        return streamAttempt(systemPrompt, messages, tools, cancellationToken, route, candidates, attempted, true, fallback);
                     }
 
                     healthRegistry.markUnhealthy(route.key(), decision.reason());
@@ -238,7 +258,7 @@ public class RoutingLLMClient implements LLMClient, RoutingStatusProvider {
                             decision.reason()
                     ));
                     Console.warn("[Routing] 流式调用切换 fallback 模型: " + route.key() + " -> " + next.key());
-                    return streamAttempt(systemPrompt, messages, tools, next, candidates, attempted, false, true);
+                    return streamAttempt(systemPrompt, messages, tools, cancellationToken, next, candidates, attempted, false, true);
                 });
     }
 
@@ -257,6 +277,9 @@ public class RoutingLLMClient implements LLMClient, RoutingStatusProvider {
             eventListener.afterModelSuccess(new RoutingEvents.AfterModelSuccess(callType, route, fallback));
             return AttemptResult.success(value);
         } catch (Throwable error) {
+            if (isUserCancelled(error)) {
+                throw rethrow(error);
+            }
             FallbackDecision decision = policy.classify(error);
             eventListener.afterModelException(new RoutingEvents.AfterModelException(
                     callType,
@@ -267,6 +290,17 @@ public class RoutingLLMClient implements LLMClient, RoutingStatusProvider {
             ));
             return AttemptResult.failure(error, decision);
         }
+    }
+
+    private boolean isUserCancelled(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof UserCancelledException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private synchronized void selectRoute(ModelRoute route) {

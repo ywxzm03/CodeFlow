@@ -28,8 +28,10 @@ public class StreamingToolExecutor {
     private final ToolAdmissionPolicy toolAdmissionPolicy;
     private final List<TrackedTool> tools;
     private final ExecutorService executorService;
+    private final CancellationToken cancellationToken;
     private volatile boolean hasErrored;
     private volatile boolean discarded;
+    private volatile boolean cancelled;
 
     public StreamingToolExecutor(List<Tool> toolDefinitions, ToolPermissionManager toolPermissionManager) {
         this(toolDefinitions, toolPermissionManager, PreToolUseHandler.none());
@@ -47,12 +49,32 @@ public class StreamingToolExecutor {
             List<Tool> toolDefinitions,
             ToolAdmissionPolicy toolAdmissionPolicy
     ) {
+        this(toolDefinitions, toolAdmissionPolicy, CancellationToken.none());
+    }
+
+    public StreamingToolExecutor(
+            List<Tool> toolDefinitions,
+            ToolPermissionManager toolPermissionManager,
+            PreToolUseHandler preToolUseHandler,
+            CancellationToken cancellationToken
+    ) {
+        this(toolDefinitions, new DefaultToolAdmissionPolicy(toolPermissionManager, preToolUseHandler), cancellationToken);
+    }
+
+    public StreamingToolExecutor(
+            List<Tool> toolDefinitions,
+            ToolAdmissionPolicy toolAdmissionPolicy,
+            CancellationToken cancellationToken
+    ) {
         this.toolDefinitions = Objects.requireNonNull(toolDefinitions, "toolDefinitions must not be null");
         this.toolAdmissionPolicy = Objects.requireNonNull(toolAdmissionPolicy, "toolAdmissionPolicy must not be null");
+        this.cancellationToken = cancellationToken == null ? CancellationToken.none() : cancellationToken;
         this.tools = new ArrayList<>();
         this.executorService = Executors.newCachedThreadPool();
         this.hasErrored = false;
         this.discarded = false;
+        this.cancelled = false;
+        this.cancellationToken.onCancel(() -> cancel("Request interrupted by user"));
     }
 
     /**
@@ -60,6 +82,10 @@ public class StreamingToolExecutor {
      */
     public synchronized void addTool(Message.ToolUse toolUse) {
         if (discarded) {
+            return;
+        }
+        if (cancelled || cancellationToken.isCancelled()) {
+            completeWithError(toolUse, "Request interrupted by user");
             return;
         }
 
@@ -115,6 +141,12 @@ public class StreamingToolExecutor {
             if (tool.status != ToolStatus.QUEUED) {
                 continue;
             }
+            if (cancelled || cancellationToken.isCancelled()) {
+                tool.result = Tool.ToolExecutionResult.error("Request interrupted by user");
+                tool.status = ToolStatus.COMPLETED;
+                notifyAll();
+                continue;
+            }
 
             // 前序 Bash 工具失败，取消后续所有工具（依赖链已断）
             if (hasErrored) {
@@ -165,7 +197,9 @@ public class StreamingToolExecutor {
         CompletableFuture<Tool.ToolExecutionResult> future = CompletableFuture.supplyAsync(() -> {
             try {
                 Console.info("  [执行] " + tracked.toolName + " (id: " + tracked.toolUseId + ")");
-                return toolDefinition.execute(tracked.input);
+                return toolDefinition.execute(tracked.input, cancellationToken);
+            } catch (UserCancelledException e) {
+                return Tool.ToolExecutionResult.error("Request interrupted by user");
             } catch (Exception e) {
                 return Tool.ToolExecutionResult.error("工具执行异常: " + e.getMessage());
             }
@@ -175,6 +209,10 @@ public class StreamingToolExecutor {
 
         future.whenComplete((result, throwable) -> {
             synchronized (StreamingToolExecutor.this) {
+                if (cancelled && tracked.status != ToolStatus.EXECUTING) {
+                    notifyAll();
+                    return;
+                }
                 if (throwable != null) {
                     tracked.result = Tool.ToolExecutionResult.error("工具执行失败: " + throwable.getMessage());
                 } else {
@@ -259,6 +297,7 @@ public class StreamingToolExecutor {
                 wait();  // 释放锁，等待 executeTool 完成回调 / addTool 的 notifyAll
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                cancel("Request interrupted by user");
                 break;
             }
             all.addAll(getCompletedResults());
@@ -283,6 +322,32 @@ public class StreamingToolExecutor {
         for (TrackedTool tool : tools) {
             if (tool.status == ToolStatus.EXECUTING && tool.future != null) {
                 tool.future.cancel(true);
+            }
+            if (tool.status != ToolStatus.YIELDED) {
+                tool.status = ToolStatus.YIELDED;
+            }
+        }
+        notifyAll();
+    }
+
+    public synchronized void cancel(String message) {
+        if (discarded) {
+            return;
+        }
+        this.cancelled = true;
+        String cancellationMessage = message == null || message.isBlank()
+                ? "Request interrupted by user"
+                : message;
+        for (TrackedTool tool : tools) {
+            if (tool.status == ToolStatus.QUEUED) {
+                tool.result = Tool.ToolExecutionResult.error(cancellationMessage);
+                tool.status = ToolStatus.COMPLETED;
+            } else if (tool.status == ToolStatus.EXECUTING) {
+                if (tool.future != null) {
+                    tool.future.cancel(true);
+                }
+                tool.result = Tool.ToolExecutionResult.error(cancellationMessage);
+                tool.status = ToolStatus.COMPLETED;
             }
         }
         notifyAll();

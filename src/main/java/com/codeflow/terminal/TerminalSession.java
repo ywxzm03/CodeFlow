@@ -2,6 +2,7 @@ package com.codeflow.terminal;
 
 import com.codeflow.config.ConfigManager;
 import com.codeflow.config.Settings;
+import com.codeflow.core.CancellationToken;
 import com.codeflow.core.ConversationSession;
 import com.codeflow.core.Message;
 import com.codeflow.core.QueryEngine;
@@ -24,6 +25,7 @@ import com.codeflow.skills.SkillRenderer;
 import com.codeflow.skills.SkillStore;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
+import org.jline.reader.Reference;
 import org.jline.reader.UserInterruptException;
 import org.jline.reader.Widget;
 import org.jline.terminal.Attributes;
@@ -38,7 +40,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 终端交互会话，负责输入循环和 slash 命令。
@@ -57,7 +64,11 @@ public final class TerminalSession implements AutoCloseable {
     private final SkillStore skillStore;
     private final SkillRenderer skillRenderer;
     private final AtomicBoolean exitRequested = new AtomicBoolean(false);
+    private final AtomicReference<CancellationToken> activeCancellation = new AtomicReference<>();
+    private final AtomicBoolean promptActive = new AtomicBoolean(false);
+    private final ExecutorService taskExecutor = Executors.newSingleThreadExecutor();
     private Settings settings;
+    private long lastIdleInterruptMillis;
 
     private Terminal terminal;
     private SlashLineReader reader;
@@ -106,8 +117,7 @@ public final class TerminalSession implements AutoCloseable {
                 try {
                     input = reader.readLine(PROMPT);
                 } catch (UserInterruptException e) {
-                    terminal.writer().println("^C");
-                    terminal.writer().flush();
+                    handleIdleInterrupt();
                     continue;
                 } catch (EndOfFileException e) {
                     break;
@@ -135,7 +145,15 @@ public final class TerminalSession implements AutoCloseable {
         lineReader.setVariable(LineReader.COMPLETION_STYLE_LIST_STARTING, "fg:blue");
         lineReader.setVariable(LineReader.COMPLETION_STYLE_STARTING, "fg:blue");
         installSlashCompletionRefreshWidgets(lineReader);
+        installInterruptWidgets(lineReader);
         return lineReader;
+    }
+
+    private void installInterruptWidgets(LineReader lineReader) {
+        lineReader.getWidgets().put("codeflow-interrupt", () -> {
+            throw new UserInterruptException(lineReader.getBuffer().toString());
+        });
+        lineReader.getKeyMaps().get(LineReader.MAIN).bind(new Reference("codeflow-interrupt"), "\u001B");
     }
 
     void installSlashCompletionRefreshWidgets(LineReader lineReader) {
@@ -193,8 +211,10 @@ public final class TerminalSession implements AutoCloseable {
         }
 
         try {
-            QueryEngine.QueryResult result = conversationSession.handleUserInput(input);
-            terminal.writer().println(result.finalResponse());
+            QueryEngine.QueryResult result = runCancellableTask(token -> conversationSession.handleUserInput(input, token));
+            if (result.stopReason() != QueryEngine.QueryResult.StopReason.USER_CANCELLED) {
+                terminal.writer().println(result.finalResponse());
+            }
             terminal.writer().flush();
         } catch (Exception e) {
             terminal.writer().println();
@@ -273,8 +293,10 @@ public final class TerminalSession implements AutoCloseable {
         }
 
         try {
-            QueryEngine.QueryResult result = conversationSession.handleUserInput(renderedSkill.get());
-            terminal.writer().println(result.finalResponse());
+            QueryEngine.QueryResult result = runCancellableTask(token -> conversationSession.handleUserInput(renderedSkill.get(), token));
+            if (result.stopReason() != QueryEngine.QueryResult.StopReason.USER_CANCELLED) {
+                terminal.writer().println(result.finalResponse());
+            }
             terminal.writer().flush();
         } catch (Exception e) {
             terminal.writer().println();
@@ -308,15 +330,107 @@ public final class TerminalSession implements AutoCloseable {
     }
 
     private void handleCompactCommand() {
-        QueryEngine.CompactResult result = conversationSession.compact();
+        QueryEngine.CompactResult result = runCancellableTask(conversationSession::compact);
         switch (result.status()) {
             case COMPACTED -> terminal.writer().println(
                     "Compact completed. Working memory: " + result.beforeMessages() + " -> " + result.afterMessages() + " messages."
             );
             case NOT_NEEDED -> terminal.writer().println("Nothing to compact.");
             case UNAVAILABLE -> terminal.writer().println("Compact is unavailable: " + result.reason() + ".");
+            case CANCELLED -> terminal.writer().println("Interrupted by user.");
             case FAILED -> terminal.writer().println("Compact failed: " + result.reason());
         }
+        terminal.writer().flush();
+    }
+
+    private <T> T runCancellableTask(java.util.function.Function<CancellationToken, T> task) {
+        CancellationToken token = CancellationToken.create();
+        activeCancellation.set(token);
+        AtomicBoolean printedInterrupt = new AtomicBoolean(false);
+        CompletableFuture<T> future = CompletableFuture.supplyAsync(() -> {
+            try {
+                return task.apply(token);
+            } finally {
+                activeCancellation.compareAndSet(token, null);
+            }
+        }, taskExecutor);
+
+        try {
+            waitForTaskCompletion(future, token, printedInterrupt);
+            return future.join();
+        } catch (CompletionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw e;
+        } finally {
+            activeCancellation.compareAndSet(token, null);
+        }
+    }
+
+    private <T> void waitForTaskCompletion(
+            CompletableFuture<T> future,
+            CancellationToken token,
+            AtomicBoolean printedInterrupt
+    ) {
+        Attributes originalAttributes = null;
+        boolean rawMode = false;
+        try {
+            while (!future.isDone()) {
+                if (promptActive.get()) {
+                    if (rawMode) {
+                        terminal.setAttributes(originalAttributes);
+                        rawMode = false;
+                    }
+                    sleepQuietly(50L);
+                    continue;
+                }
+                if (!rawMode) {
+                    originalAttributes = terminal.enterRawMode();
+                    rawMode = true;
+                }
+
+                int character = terminal.reader().read(100L);
+                if (character == NonBlockingReader.READ_EXPIRED) {
+                    continue;
+                }
+                if (character == 3 || character == 27) {
+                    token.cancel(CancellationToken.USER_CANCEL);
+                    if (printedInterrupt.compareAndSet(false, true)) {
+                        terminal.writer().println();
+                        terminal.writer().println("Interrupted by user.");
+                        terminal.writer().flush();
+                    }
+                }
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed while waiting for terminal input", e);
+        } finally {
+            if (rawMode) {
+                terminal.setAttributes(originalAttributes);
+            }
+        }
+    }
+
+    private void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private void handleIdleInterrupt() {
+        long now = System.currentTimeMillis();
+        if (now - lastIdleInterruptMillis <= 2500L) {
+            exitRequested.set(true);
+            terminal.writer().println("Goodbye!");
+            terminal.writer().flush();
+            return;
+        }
+        lastIdleInterruptMillis = now;
+        terminal.writer().println("Press Ctrl+C or Esc again to exit.");
         terminal.writer().flush();
     }
 
@@ -522,12 +636,15 @@ public final class TerminalSession implements AutoCloseable {
         terminal.writer().flush();
 
         try {
+            promptActive.set(true);
             String answer = reader.readLine("Allow " + toolName + "? [y/N] ");
             return "y".equalsIgnoreCase(answer.trim()) || "yes".equalsIgnoreCase(answer.trim());
         } catch (UserInterruptException | EndOfFileException e) {
             terminal.writer().println();
             terminal.writer().flush();
             return false;
+        } finally {
+            promptActive.set(false);
         }
     }
 
@@ -564,12 +681,15 @@ public final class TerminalSession implements AutoCloseable {
         terminal.writer().flush();
 
         try {
+            promptActive.set(true);
             String answer = reader.readLine("Update memory? [y/N] ");
             return "y".equalsIgnoreCase(answer.trim()) || "yes".equalsIgnoreCase(answer.trim());
         } catch (UserInterruptException | EndOfFileException e) {
             terminal.writer().println();
             terminal.writer().flush();
             return false;
+        } finally {
+            promptActive.set(false);
         }
     }
 
@@ -880,6 +1000,7 @@ public final class TerminalSession implements AutoCloseable {
                 // Best-effort terminal cleanup.
             }
         }
+        taskExecutor.shutdownNow();
     }
 
     private final class TerminalCommandContext implements SlashCommand.Context {

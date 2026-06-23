@@ -29,11 +29,20 @@ public final class ConversationSession {
     }
 
     public QueryEngine.QueryResult handleUserInput(String input) {
+        return handleUserInput(input, CancellationToken.none());
+    }
+
+    public QueryEngine.QueryResult handleUserInput(String input, CancellationToken cancellationToken) {
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
         int startIndex = workingMemory.size();
-        QueryEngine.QueryResult result = queryEngine.query(input, workingMemory);
+        QueryEngine.QueryResult result = queryEngine.query(input, workingMemory, token);
         transcriptRecorder.recordUnpersisted(workingMemory);
         if (result.stopReason() == QueryEngine.QueryResult.StopReason.COMPLETED && memoryReflection != null) {
-            memoryReflection.reflect(result.turnMessages());
+            if (token == CancellationToken.none()) {
+                memoryReflection.reflect(result.turnMessages());
+            } else {
+                memoryReflection.reflect(result.turnMessages(), token);
+            }
         }
         return result;
     }
@@ -48,7 +57,11 @@ public final class ConversationSession {
     }
 
     public QueryEngine.CompactResult compact() {
-        return queryEngine.compact(workingMemory);
+        return compact(CancellationToken.none());
+    }
+
+    public QueryEngine.CompactResult compact(CancellationToken cancellationToken) {
+        return queryEngine.compact(workingMemory, cancellationToken);
     }
 
     public WorkingMemory workingMemory() {
