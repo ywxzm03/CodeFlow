@@ -29,7 +29,7 @@ public final class SlashCommandRegistry {
 
     public static SlashCommandRegistry defaults(String modelName, SkillStore skillStore) {
         List<SlashCommand> commands = new ArrayList<>();
-        commands.add(new SlashCommand("agent", "Inspect or cancel background agents", (context, arguments) -> SlashCommand.Result.CONTINUE));
+        commands.add(new SlashCommand("agent", "Show running agent names", (context, arguments) -> SlashCommand.Result.CONTINUE));
         commands.add(new SlashCommand("batch", "Plan and launch parallel worktree subagents", (context, arguments) -> SlashCommand.Result.CONTINUE));
         commands.add(new SlashCommand("clear", "Clear working memory and terminal screen", (context, arguments) -> SlashCommand.Result.CONTINUE));
         commands.add(new SlashCommand("compact", "Compact working memory", (context, arguments) -> SlashCommand.Result.CONTINUE));

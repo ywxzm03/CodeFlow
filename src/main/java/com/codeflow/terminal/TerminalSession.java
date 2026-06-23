@@ -360,23 +360,11 @@ public final class TerminalSession implements AutoCloseable {
             return;
         }
         if (arguments == null || arguments.isBlank()) {
-            terminal.writer().println("Usage: /agent output <agentId> or /agent cancel <agentId>");
+            terminal.writer().println(batchCoordinator.formatRunningAgents());
             terminal.writer().flush();
             return;
         }
-        String[] parts = arguments.split("\\s+", 2);
-        String action = parts[0];
-        String agentId = parts.length > 1 ? parts[1].trim() : "";
-        if (agentId.isBlank()) {
-            terminal.writer().println("Missing agentId.");
-            terminal.writer().flush();
-            return;
-        }
-        switch (action) {
-            case "output" -> terminal.writer().println(batchCoordinator.formatAgentOutput(agentId));
-            case "cancel" -> terminal.writer().println(batchCoordinator.cancelAgent(agentId));
-            default -> terminal.writer().println("Usage: /agent output <agentId> or /agent cancel <agentId>");
-        }
+        terminal.writer().println("Usage: /agent");
         terminal.writer().flush();
     }
 

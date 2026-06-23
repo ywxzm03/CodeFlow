@@ -72,20 +72,44 @@ public final class BatchCoordinator {
         plans.put(plan.batchId(), plan);
         persistPlan(plan);
         for (BatchWorkUnit unit : plan.workUnits()) {
-            subagentRunner.launchCoder(
-                    new AgentInvocation(
-                            AgentDefinition.CODER,
-                            plan.batchId(),
-                            unit.unitId(),
-                            coderPrompt(plan, unit),
-                            unit.title()
-                    ),
+            AgentInvocation coderInvocation = new AgentInvocation(
+                    AgentDefinition.CODER,
+                    plan.batchId(),
+                    unit.unitId(),
+                    coderPrompt(plan, unit),
+                    unit.title()
+            );
+            AgentInvocation verifierInvocation = new AgentInvocation(
+                    AgentDefinition.VERIFIER,
+                    plan.batchId(),
+                    unit.unitId(),
+                    verifierPrompt(plan, unit),
+                    "Verify " + unit.title(),
+                    true,
+                    "",
+                    ""
+            );
+            subagentRunner.launchCoderWithVerifier(
+                    coderInvocation,
+                    verifierInvocation,
                     taskRegistry,
                     worktreeService,
                     executorService
             );
         }
         return taskRegistry.listBatch(plan.batchId());
+    }
+
+    public String formatRunningAgents() {
+        List<BackgroundAgentTask.Snapshot> running = taskRegistry.listRunning();
+        if (running.isEmpty()) {
+            return "No running agents.";
+        }
+        StringBuilder builder = new StringBuilder("Running agents:\n\n");
+        for (BackgroundAgentTask.Snapshot task : running) {
+            builder.append("- ").append(task.displayName()).append('\n');
+        }
+        return builder.toString().stripTrailing();
     }
 
     public String formatStatus(String batchId) {
@@ -107,39 +131,6 @@ public final class BatchCoordinator {
             builder.append(formatWorkerTable(entry.getValue())).append("\n\n");
         }
         return builder.toString().stripTrailing();
-    }
-
-    public String formatAgentOutput(String agentId) {
-        BackgroundAgentTask.Snapshot task = taskRegistry.find(agentId)
-                .map(BackgroundAgentTask::snapshot)
-                .orElse(null);
-        if (task == null) {
-            return "Agent not found: " + agentId;
-        }
-
-        StringBuilder builder = new StringBuilder();
-        builder.append("Agent: ").append(task.agentId()).append('\n');
-        builder.append("Batch: ").append(task.batchId()).append('\n');
-        builder.append("Unit: ").append(task.unitId()).append('\n');
-        builder.append("Status: ").append(task.status()).append('\n');
-        builder.append("Branch: ").append(value(task.branchName())).append('\n');
-        builder.append("Commit: ").append(value(task.commitSha())).append('\n');
-        builder.append("Worktree: ").append(task.worktreePath() == null ? "-" : task.worktreePath()).append('\n');
-        builder.append("Tests: ").append(value(task.testSummary())).append('\n');
-        builder.append("Summary: ").append(value(task.resultSummary())).append('\n');
-        if (task.failureReason() != null && !task.failureReason().isBlank()) {
-            builder.append("Failure: ").append(task.failureReason()).append('\n');
-        }
-        builder.append("\nLog:\n").append(readLogExcerpt(task.logPath()));
-        return builder.toString().stripTrailing();
-    }
-
-    public String cancelAgent(String agentId) {
-        boolean found = taskRegistry.cancel(agentId);
-        if (!found) {
-            return "Agent not found: " + agentId;
-        }
-        return "Agent " + agentId + " cancelled. Worktree, if already created, is kept for inspection.";
     }
 
     public void shutdown() {
@@ -171,38 +162,26 @@ public final class BatchCoordinator {
 
     private String formatWorkerTable(List<BackgroundAgentTask.Snapshot> tasks) {
         StringBuilder builder = new StringBuilder();
-        builder.append("# | Unit | Status | Branch | Commit | Tests | Worktree\n");
-        builder.append("--|------|--------|--------|--------|-------|---------\n");
+        builder.append("# | Unit | Agent | Status | Branch | Commit | Verdict | Tests | Worktree\n");
+        builder.append("--|------|-------|--------|--------|--------|---------|-------|---------\n");
         List<BackgroundAgentTask.Snapshot> sorted = tasks.stream()
-                .sorted(Comparator.comparing(BackgroundAgentTask.Snapshot::unitId))
+                .sorted(Comparator.comparing(BackgroundAgentTask.Snapshot::unitId)
+                        .thenComparing(BackgroundAgentTask.Snapshot::agentType))
                 .toList();
         for (int i = 0; i < sorted.size(); i++) {
             BackgroundAgentTask.Snapshot task = sorted.get(i);
             builder.append(i + 1).append(" | ")
                     .append(task.unitId()).append(" | ")
+                    .append(task.agentType()).append(" | ")
                     .append(task.status()).append(" | ")
                     .append(value(task.branchName())).append(" | ")
                     .append(value(task.commitSha())).append(" | ")
+                    .append(value(task.verdict())).append(" | ")
                     .append(value(task.testSummary())).append(" | ")
                     .append(task.worktreePath() == null ? "-" : task.worktreePath())
                     .append('\n');
         }
         return builder.toString().stripTrailing();
-    }
-
-    private String readLogExcerpt(Path logPath) {
-        if (logPath == null || !Files.exists(logPath)) {
-            return "(no log yet)";
-        }
-        try {
-            String content = Files.readString(logPath);
-            if (content.length() <= 4000) {
-                return content;
-            }
-            return "... truncated ...\n" + content.substring(content.length() - 4000);
-        } catch (IOException e) {
-            return "(failed to read log: " + e.getMessage() + ")";
-        }
     }
 
     private void persistPlan(BatchPlan plan) {
@@ -289,6 +268,44 @@ public final class BatchCoordinator {
                 unit.unitId(),
                 unit.description(),
                 unit.targetFilesOrDirectories().isEmpty() ? "-" : String.join(", ", unit.targetFilesOrDirectories()),
+                unit.expectedChange(),
+                unit.validationInstructions().isBlank() ? plan.validationRecipe() : unit.validationInstructions()
+        );
+    }
+
+    private static String verifierPrompt(BatchPlan plan, BatchWorkUnit unit) {
+        return """
+                You are Verifier, an independent verification subagent for CodeFlow.
+
+                Verify the completed Coder work for this batch unit. You are running in the Coder worktree.
+                Do not modify project source files. Do not commit, push, create PRs, merge, or cherry-pick.
+                You may run build, test, lint, typecheck, and read-only inspection commands.
+
+                Overall batch goal:
+                %s
+
+                Unit:
+                %s (%s)
+
+                Expected change:
+                %s
+
+                Validation recipe:
+                %s
+
+                Run concrete verification commands and inspect the results. Try at least one edge or regression-oriented check when practical.
+
+                End with exactly these fields:
+                STATUS: success|failed
+                VERDICT: PASS|FAIL|PARTIAL
+                COMMANDS: <commands run>
+                EVIDENCE: <important outputs>
+                SUMMARY: <short verification summary>
+                FAILURE_REASON: <reason or none>
+                """.formatted(
+                plan.overallGoal(),
+                unit.title(),
+                unit.unitId(),
                 unit.expectedChange(),
                 unit.validationInstructions().isBlank() ? plan.validationRecipe() : unit.validationInstructions()
         );
