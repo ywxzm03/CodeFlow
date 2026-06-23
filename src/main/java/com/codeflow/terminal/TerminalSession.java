@@ -14,6 +14,11 @@ import com.codeflow.memory.TranscriptStore;
 import com.codeflow.permissions.PermissionMode;
 import com.codeflow.permissions.ToolPermission;
 import com.codeflow.permissions.ToolPermissionManager;
+import com.codeflow.routing.ModelHealth;
+import com.codeflow.routing.ModelHealthStatus;
+import com.codeflow.routing.ModelRoute;
+import com.codeflow.routing.RoutingSnapshot;
+import com.codeflow.routing.RoutingStatusProvider;
 import com.codeflow.skills.SkillDefinition;
 import com.codeflow.skills.SkillRenderer;
 import com.codeflow.skills.SkillStore;
@@ -316,7 +321,11 @@ public final class TerminalSession implements AutoCloseable {
     }
 
     private void handleHookCommand() {
-        terminal.writer().println(formatConfiguredHooks(settings, configManager.getConfigFilePath()));
+        terminal.writer().println(formatConfiguredHooks(
+                settings,
+                configManager.getConfigFilePath(),
+                routingSnapshot(llmClient)
+        ));
         terminal.writer().flush();
     }
 
@@ -757,6 +766,10 @@ public final class TerminalSession implements AutoCloseable {
     }
 
     static String formatConfiguredHooks(Settings settings, Path settingsPath) {
+        return formatConfiguredHooks(settings, settingsPath, RoutingSnapshot.disabled());
+    }
+
+    static String formatConfiguredHooks(Settings settings, Path settingsPath, RoutingSnapshot routingSnapshot) {
         Settings resolved = settings == null ? Settings.defaults() : settings;
         StringBuilder builder = new StringBuilder();
         builder.append("Configured hooks:\n");
@@ -788,7 +801,74 @@ public final class TerminalSession implements AutoCloseable {
             builder.append("    Command: ").append(stopHook.command()).append('\n');
             builder.append("    Timeout: ").append(stopHook.resolvedTimeoutSeconds()).append("s\n");
         }
+        appendRoutingHooks(builder, resolved, routingSnapshot);
         return builder.toString();
+    }
+
+    private static void appendRoutingHooks(StringBuilder builder, Settings settings, RoutingSnapshot runtimeSnapshot) {
+        Settings.Routing routing = settings.resolvedRouting();
+        RoutingSnapshot snapshot = runtimeSnapshot == null ? RoutingSnapshot.disabled() : runtimeSnapshot;
+        boolean enabled = routing.enabled() && snapshot.enabled();
+        builder.append("  ModelRouting\n");
+        builder.append("    Handler: ").append(enabled ? "intelligent routing" : "disabled").append('\n');
+        builder.append("    Mount points:\n");
+        builder.append("      BeforeModelCall\n");
+        builder.append("      AfterModelSuccess\n");
+        builder.append("      AfterModelException\n");
+        builder.append("      BeforeFallbackSwitch\n");
+        builder.append("      AfterAllCandidatesFailed\n");
+        builder.append("    Retry current model once: ").append(routing.retryCurrentModelOnce()).append('\n');
+        builder.append("    Unhealthy cooldown: ").append(routing.unhealthyCooldownSeconds()).append("s\n");
+        if (!snapshot.enabled() || snapshot.activeModel() == null) {
+            return;
+        }
+
+        builder.append("    Active model: ").append(formatRoute(snapshot.activeModel())).append('\n');
+        builder.append("    Fallback order: ");
+        if (snapshot.fallbackCandidates().isEmpty()) {
+            builder.append("none\n");
+        } else {
+            builder.append(snapshot.fallbackCandidates().stream()
+                    .map(TerminalSession::formatRoute)
+                    .reduce((left, right) -> left + ", " + right)
+                    .orElse("none"))
+                    .append('\n');
+        }
+        if (!snapshot.health().isEmpty()) {
+            builder.append("    Health:\n");
+            snapshot.health().entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(entry -> builder.append("      ")
+                            .append(entry.getKey())
+                            .append(": ")
+                            .append(formatHealth(entry.getValue()))
+                            .append('\n'));
+        }
+    }
+
+    private static RoutingSnapshot routingSnapshot(LLMClient llmClient) {
+        if (llmClient instanceof RoutingStatusProvider provider) {
+            return provider.routingSnapshot();
+        }
+        return RoutingSnapshot.disabled();
+    }
+
+    private static String formatRoute(ModelRoute route) {
+        return route.key() + " (" + route.model() + ")";
+    }
+
+    private static String formatHealth(ModelHealth health) {
+        if (health == null || health.status() == ModelHealthStatus.UNKNOWN) {
+            return "unknown";
+        }
+        if (health.status() == ModelHealthStatus.HEALTHY) {
+            return "healthy";
+        }
+        String reason = health.reason().isBlank() ? "unhealthy" : health.reason();
+        if (health.unhealthyUntil() == null) {
+            return "unhealthy - " + reason;
+        }
+        return "unhealthy - " + reason + " until " + health.unhealthyUntil();
     }
 
     @Override

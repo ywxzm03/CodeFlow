@@ -7,6 +7,9 @@ import com.codeflow.memory.TranscriptRecorder;
 import com.codeflow.permissions.PermissionMode;
 import com.codeflow.permissions.ToolPermission;
 import com.codeflow.permissions.ToolPermissionManager;
+import com.codeflow.routing.ModelHealth;
+import com.codeflow.routing.ModelRoute;
+import com.codeflow.routing.RoutingSnapshot;
 import com.codeflow.skills.SkillRenderer;
 import com.codeflow.skills.SkillStore;
 import com.codeflow.core.QueryEngine;
@@ -20,6 +23,8 @@ import reactor.core.publisher.Flux;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.List;
@@ -309,6 +314,47 @@ class SlashCommandRegistryTest {
         assertTrue(formatted.contains("Read: allow"));
         assertTrue(formatted.contains("Stop"));
         assertTrue(formatted.contains("Handler: disabled"));
+        assertTrue(formatted.contains("ModelRouting"));
+        assertTrue(formatted.contains("Mount points:"));
+        assertTrue(formatted.contains("BeforeModelCall"));
+        assertTrue(formatted.contains("AfterAllCandidatesFailed"));
+        assertTrue(formatted.contains("Retry current model once: true"));
+        assertTrue(formatted.contains("Unhealthy cooldown: 300s"));
+    }
+
+    @Test
+    void formatConfiguredHooksShowsRoutingRuntimeSnapshot() {
+        Settings settings = new Settings(
+                "key",
+                "url",
+                "A",
+                Settings.defaults().resolvedModels(),
+                1000,
+                5,
+                PermissionMode.ASK,
+                Map.of(),
+                Settings.Compaction.defaults()
+        );
+        RoutingSnapshot snapshot = new RoutingSnapshot(
+                true,
+                new ModelRoute("B", "model-b"),
+                List.of(new ModelRoute("A", "model-a"), new ModelRoute("C", "model-c")),
+                true,
+                Duration.ofSeconds(300),
+                Map.of(
+                        "A", ModelHealth.unhealthy("HTTP 429", Instant.parse("2026-06-23T00:05:00Z")),
+                        "B", ModelHealth.healthy()
+                )
+        );
+
+        String formatted = TerminalSession.formatConfiguredHooks(settings, tempDir.resolve("settings.json"), snapshot);
+
+        assertTrue(formatted.contains("ModelRouting"));
+        assertTrue(formatted.contains("Handler: intelligent routing"));
+        assertTrue(formatted.contains("Active model: B (model-b)"));
+        assertTrue(formatted.contains("Fallback order: A (model-a), C (model-c)"));
+        assertTrue(formatted.contains("A: unhealthy - HTTP 429 until 2026-06-23T00:05:00Z"));
+        assertTrue(formatted.contains("B: healthy"));
     }
 
     private SlashCommandRegistry registry() {

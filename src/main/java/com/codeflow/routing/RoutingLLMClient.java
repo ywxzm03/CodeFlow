@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-public class RoutingLLMClient implements LLMClient {
+public class RoutingLLMClient implements LLMClient, RoutingStatusProvider {
     private final LLMClient delegate;
     private final List<ModelRoute> routes;
     private final FallbackPolicy policy;
@@ -85,6 +85,11 @@ public class RoutingLLMClient implements LLMClient {
     }
 
     public RoutingSnapshot snapshot() {
+        return routingSnapshot();
+    }
+
+    @Override
+    public RoutingSnapshot routingSnapshot() {
         ModelRoute active = activeRoute;
         return new RoutingSnapshot(
                 true,

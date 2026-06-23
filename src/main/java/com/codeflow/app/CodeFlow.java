@@ -21,6 +21,8 @@ import com.codeflow.memory.MemoryStore;
 import com.codeflow.memory.TranscriptRecorder;
 import com.codeflow.memory.TranscriptStore;
 import com.codeflow.permissions.ToolPermissionManager;
+import com.codeflow.routing.FallbackPolicy;
+import com.codeflow.routing.RoutingLLMClient;
 import com.codeflow.skills.SkillRenderer;
 import com.codeflow.skills.SkillStore;
 import com.codeflow.terminal.TerminalSession;
@@ -36,6 +38,7 @@ import com.codeflow.tools.WriteTool;
 import com.codeflow.util.Console;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Handler;
@@ -81,6 +84,18 @@ public class CodeFlow {
                 settings.resolvedModel(),
                 settings.maxTokens()
         );
+        Settings.Routing routing = settings.resolvedRouting();
+        if (routing.enabled()) {
+            llmClient = new RoutingLLMClient(
+                    llmClient,
+                    settings.resolvedModels(),
+                    settings.model(),
+                    new FallbackPolicy(
+                            routing.retryCurrentModelOnce(),
+                            Duration.ofSeconds(routing.unhealthyCooldownSeconds())
+                    )
+            );
+        }
 
         // 注册基础工具。
         List<Tool> tools = new ArrayList<>();

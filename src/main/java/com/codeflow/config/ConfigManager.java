@@ -132,6 +132,11 @@ public class ConfigManager {
                     "auto_compact_hot_messages": 5,
                     "reactive_compact_hot_messages": 2
                   },
+                  "routing": {
+                    "enabled": true,
+                    "retry_current_model_once": true,
+                    "unhealthy_cooldown_seconds": 300
+                  },
                   "hooks": {
                     "Stop": {
                       "command": "",
