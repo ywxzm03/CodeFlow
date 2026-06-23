@@ -192,6 +192,7 @@ public record Settings(
         permissions.put("Glob", ToolPermission.ASK);
         permissions.put("MemoryRead", ToolPermission.ASK);
         permissions.put("Skill", ToolPermission.ASK);
+        permissions.put("Agent", ToolPermission.ASK);
         return permissions;
     }
 

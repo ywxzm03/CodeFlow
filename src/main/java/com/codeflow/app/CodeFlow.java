@@ -1,5 +1,8 @@
 package com.codeflow.app;
 
+import com.codeflow.agents.AgentTool;
+import com.codeflow.agents.SubagentRunner;
+import com.codeflow.batch.BatchCoordinator;
 import com.codeflow.config.ConfigManager;
 import com.codeflow.config.Settings;
 import com.codeflow.compact.AutoCompactor;
@@ -25,6 +28,7 @@ import com.codeflow.routing.FallbackPolicy;
 import com.codeflow.routing.RoutingLLMClient;
 import com.codeflow.skills.SkillRenderer;
 import com.codeflow.skills.SkillStore;
+import com.codeflow.tasks.BackgroundTaskRegistry;
 import com.codeflow.terminal.TerminalSession;
 import com.codeflow.tools.BashTool;
 import com.codeflow.tools.EditTool;
@@ -36,11 +40,15 @@ import com.codeflow.tools.SkillTool;
 import com.codeflow.tools.Tool;
 import com.codeflow.tools.WriteTool;
 import com.codeflow.util.Console;
+import com.codeflow.worktree.WorktreeService;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogManager;
@@ -135,6 +143,26 @@ public class CodeFlow {
             Console.warn("[Memory] 初始化失败，已禁用记忆系统: " + e.getMessage());
         }
 
+        Path projectRoot = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+        List<Tool> subagentTools = List.copyOf(tools);
+        BackgroundTaskRegistry backgroundTaskRegistry = new BackgroundTaskRegistry(projectRoot);
+        WorktreeService worktreeService = new WorktreeService(projectRoot);
+        ExecutorService backgroundAgentExecutor = Executors.newCachedThreadPool();
+        SubagentRunner subagentRunner = new SubagentRunner(
+                llmClient,
+                subagentTools,
+                settings.maxIterations(),
+                skillStore
+        );
+        BatchCoordinator batchCoordinator = new BatchCoordinator(
+                subagentRunner,
+                backgroundTaskRegistry,
+                worktreeService,
+                backgroundAgentExecutor,
+                projectRoot
+        );
+        tools.add(new AgentTool(subagentRunner, backgroundTaskRegistry, worktreeService, backgroundAgentExecutor));
+
         // 初始化工具权限管理。settings.json 中的 tool_permissions 由内置 PreToolUse 处理器读取。
         ToolPermissionManager toolPermissionManager = new ToolPermissionManager(settings.resolvedPermissionMode());
         PreToolUseHandler preToolUseHandler = new InternalSettingsPermissionPreToolUseHandler(configManager);
@@ -186,7 +214,8 @@ public class CodeFlow {
                 transcriptRecorder,
                 transcriptStore,
                 skillStore,
-                skillRenderer
+                skillRenderer,
+                batchCoordinator
         ).run();
     }
 

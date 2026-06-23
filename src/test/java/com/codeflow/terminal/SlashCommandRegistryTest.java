@@ -47,7 +47,7 @@ class SlashCommandRegistryTest {
                 .map(SlashCommand::displayName)
                 .toList();
 
-        assertEquals(List.of("/clear", "/compact", "/exit", "/help", "/hook", "/model", "/permissions", "/resume"), matches);
+        assertEquals(List.of("/agent", "/batch", "/clear", "/compact", "/exit", "/help", "/hook", "/model", "/permissions", "/resume"), matches);
     }
 
     @Test
@@ -79,7 +79,7 @@ class SlashCommandRegistryTest {
         reader.getBuffer().write("/");
         completer.complete(reader, null, candidates);
 
-        assertEquals(List.of("/clear", "/compact", "/exit", "/help", "/hook", "/model", "/permissions", "/resume"), candidateValues(candidates));
+        assertEquals(List.of("/agent", "/batch", "/clear", "/compact", "/exit", "/help", "/hook", "/model", "/permissions", "/resume"), candidateValues(candidates));
     }
 
     @Test
@@ -359,6 +359,8 @@ class SlashCommandRegistryTest {
 
     private SlashCommandRegistry registry() {
         return new SlashCommandRegistry(List.of(
+                new SlashCommand("agent", "Inspect agents", (context, arguments) -> SlashCommand.Result.CONTINUE),
+                new SlashCommand("batch", "Run batch", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("help", "Show help", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("hook", "Show hooks", (context, arguments) -> SlashCommand.Result.CONTINUE),
                 new SlashCommand("model", "Show model", (context, arguments) -> SlashCommand.Result.CONTINUE),

@@ -52,7 +52,7 @@ public class DefaultToolAdmissionPolicy implements ToolAdmissionPolicy {
                 toolUse.id(),
                 toolUse.name(),
                 toolUse.input(),
-                System.getProperty("user.dir"),
+                toolExecutionContext.cwd().toString(),
                 toolPermissionManager.permissionMode()
         ));
         HookDecision decision = preToolUseResult == null ? HookDecision.NONE : preToolUseResult.decision();

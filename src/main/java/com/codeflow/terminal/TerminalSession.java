@@ -2,6 +2,8 @@ package com.codeflow.terminal;
 
 import com.codeflow.config.ConfigManager;
 import com.codeflow.config.Settings;
+import com.codeflow.batch.BatchCoordinator;
+import com.codeflow.batch.BatchPlan;
 import com.codeflow.core.CancellationToken;
 import com.codeflow.core.ConversationSession;
 import com.codeflow.core.Message;
@@ -63,6 +65,7 @@ public final class TerminalSession implements AutoCloseable {
     private final TranscriptStore transcriptStore;
     private final SkillStore skillStore;
     private final SkillRenderer skillRenderer;
+    private final BatchCoordinator batchCoordinator;
     private final AtomicBoolean exitRequested = new AtomicBoolean(false);
     private final AtomicReference<CancellationToken> activeCancellation = new AtomicReference<>();
     private final AtomicBoolean promptActive = new AtomicBoolean(false);
@@ -85,6 +88,22 @@ public final class TerminalSession implements AutoCloseable {
             SkillStore skillStore,
             SkillRenderer skillRenderer
     ) {
+        this(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, transcriptRecorder, transcriptStore, skillStore, skillRenderer, null);
+    }
+
+    public TerminalSession(
+            QueryEngine queryEngine,
+            LLMClient llmClient,
+            ConfigManager configManager,
+            Settings settings,
+            ToolPermissionManager toolPermissionManager,
+            MemoryReflection memoryReflection,
+            TranscriptRecorder transcriptRecorder,
+            TranscriptStore transcriptStore,
+            SkillStore skillStore,
+            SkillRenderer skillRenderer,
+            BatchCoordinator batchCoordinator
+    ) {
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         TranscriptRecorder activeTranscriptRecorder = Objects.requireNonNull(transcriptRecorder, "transcriptRecorder must not be null");
         this.conversationSession = new ConversationSession(
@@ -96,6 +115,7 @@ public final class TerminalSession implements AutoCloseable {
         this.configManager = Objects.requireNonNull(configManager, "configManager must not be null");
         this.skillStore = skillStore;
         this.skillRenderer = skillRenderer;
+        this.batchCoordinator = batchCoordinator;
         this.slashCommands = SlashCommandRegistry.defaults(this.settings.resolvedModel(), skillStore);
         this.toolPermissionManager = Objects.requireNonNull(toolPermissionManager, "toolPermissionManager must not be null");
         this.transcriptStore = transcriptStore;
@@ -240,6 +260,16 @@ public final class TerminalSession implements AutoCloseable {
             return;
         }
 
+        if ("/batch".equals(input) || input.startsWith("/batch ")) {
+            handleBatchCommand(slashArguments(input));
+            return;
+        }
+
+        if ("/agent".equals(input) || input.startsWith("/agent ")) {
+            handleAgentCommand(slashArguments(input));
+            return;
+        }
+
         if ("/help".equals(input) || input.startsWith("/help ")) {
             printSlashCommandList(slashCommands.commands());
             return;
@@ -284,6 +314,84 @@ public final class TerminalSession implements AutoCloseable {
             terminal.writer().println("Type / to see available commands.");
             terminal.writer().flush();
         });
+    }
+
+    private void handleBatchCommand(String arguments) {
+        if (batchCoordinator == null) {
+            terminal.writer().println("Batch subagents are unavailable in this session.");
+            terminal.writer().flush();
+            return;
+        }
+        if (arguments == null || arguments.isBlank()) {
+            terminal.writer().println("Usage: /batch <task> or /batch status [batchId]");
+            terminal.writer().flush();
+            return;
+        }
+        if ("status".equals(arguments) || arguments.startsWith("status ")) {
+            terminal.writer().println(batchCoordinator.formatStatus(arguments.substring("status".length()).trim()));
+            terminal.writer().flush();
+            return;
+        }
+
+        try {
+            BatchPlan plan = runCancellableTask(token -> batchCoordinator.preparePlan(arguments, token));
+            terminal.writer().println(plan.renderForApproval());
+            terminal.writer().println();
+            terminal.writer().flush();
+            if (!confirmBatchPlan()) {
+                terminal.writer().println("Batch cancelled before launching workers.");
+                terminal.writer().flush();
+                return;
+            }
+            batchCoordinator.launchWorkers(plan);
+            terminal.writer().println("Batch launched: " + plan.batchId());
+            terminal.writer().println(batchCoordinator.formatStatus(plan.batchId()));
+            terminal.writer().flush();
+        } catch (Exception e) {
+            terminal.writer().println("Batch failed: " + e.getMessage());
+            terminal.writer().flush();
+        }
+    }
+
+    private void handleAgentCommand(String arguments) {
+        if (batchCoordinator == null) {
+            terminal.writer().println("Background agents are unavailable in this session.");
+            terminal.writer().flush();
+            return;
+        }
+        if (arguments == null || arguments.isBlank()) {
+            terminal.writer().println("Usage: /agent output <agentId> or /agent cancel <agentId>");
+            terminal.writer().flush();
+            return;
+        }
+        String[] parts = arguments.split("\\s+", 2);
+        String action = parts[0];
+        String agentId = parts.length > 1 ? parts[1].trim() : "";
+        if (agentId.isBlank()) {
+            terminal.writer().println("Missing agentId.");
+            terminal.writer().flush();
+            return;
+        }
+        switch (action) {
+            case "output" -> terminal.writer().println(batchCoordinator.formatAgentOutput(agentId));
+            case "cancel" -> terminal.writer().println(batchCoordinator.cancelAgent(agentId));
+            default -> terminal.writer().println("Usage: /agent output <agentId> or /agent cancel <agentId>");
+        }
+        terminal.writer().flush();
+    }
+
+    private boolean confirmBatchPlan() {
+        try {
+            promptActive.set(true);
+            String answer = reader.readLine("Launch Coder workers? [y/N] ");
+            return "y".equalsIgnoreCase(answer.trim()) || "yes".equalsIgnoreCase(answer.trim());
+        } catch (UserInterruptException | EndOfFileException e) {
+            terminal.writer().println();
+            terminal.writer().flush();
+            return false;
+        } finally {
+            promptActive.set(false);
+        }
     }
 
     private boolean handleSkillCommand(String input) {
@@ -1001,6 +1109,9 @@ public final class TerminalSession implements AutoCloseable {
             }
         }
         taskExecutor.shutdownNow();
+        if (batchCoordinator != null) {
+            batchCoordinator.shutdown();
+        }
     }
 
     private final class TerminalCommandContext implements SlashCommand.Context {
