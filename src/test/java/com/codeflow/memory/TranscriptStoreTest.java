@@ -174,6 +174,20 @@ class TranscriptStoreTest {
     }
 
     @Test
+    void hookSnapshotsDoNotEnterSessionList() throws Exception {
+        TranscriptStore store = initializedStore();
+        Path snapshot = store.writeHookSnapshot("session-a", "Stop", List.of(
+                new Message.User("finish"),
+                new Message.Assistant("done", List.of(), null)
+        ));
+
+        assertTrue(Files.exists(snapshot));
+        assertTrue(snapshot.toString().contains(".hooks"));
+        assertTrue(Files.readString(snapshot).contains("\"text\":\"done\""));
+        assertTrue(store.listSessions().isEmpty());
+    }
+
+    @Test
     void rejectsUnsafeSessionIds() throws Exception {
         TranscriptStore store = initializedStore();
 

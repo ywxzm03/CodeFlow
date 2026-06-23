@@ -308,7 +308,7 @@ class SlashCommandRegistryTest {
         assertTrue(formatted.contains("Bash: deny"));
         assertTrue(formatted.contains("Read: allow"));
         assertTrue(formatted.contains("Stop"));
-        assertTrue(formatted.contains("Handler: validation reminder"));
+        assertTrue(formatted.contains("Handler: disabled"));
     }
 
     private SlashCommandRegistry registry() {

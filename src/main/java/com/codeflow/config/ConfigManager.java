@@ -131,6 +131,12 @@ public class ConfigManager {
                     "auto_compact_threshold_ratio": 0.8,
                     "auto_compact_hot_messages": 5,
                     "reactive_compact_hot_messages": 2
+                  },
+                  "hooks": {
+                    "Stop": {
+                      "command": "",
+                      "timeout_seconds": 30
+                    }
                   }
                 }
                 """;

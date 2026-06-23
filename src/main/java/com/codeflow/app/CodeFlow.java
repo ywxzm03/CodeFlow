@@ -9,9 +9,10 @@ import com.codeflow.compact.ReactiveCompactor;
 import com.codeflow.compact.SnipCompactor;
 import com.codeflow.compact.TokenEstimator;
 import com.codeflow.core.QueryEngine;
+import com.codeflow.hooks.CommandStopHookHandler;
 import com.codeflow.hooks.InternalSettingsPermissionPreToolUseHandler;
-import com.codeflow.hooks.InternalValidationStopHookHandler;
 import com.codeflow.hooks.PreToolUseHandler;
+import com.codeflow.hooks.StopHookHandler;
 import com.codeflow.llm.AnthropicClient;
 import com.codeflow.llm.LLMClient;
 import com.codeflow.memory.MemoryContextProvider;
@@ -122,6 +123,10 @@ public class CodeFlow {
         // 初始化工具权限管理。settings.json 中的 tool_permissions 由内置 PreToolUse 处理器读取。
         ToolPermissionManager toolPermissionManager = new ToolPermissionManager(settings.resolvedPermissionMode());
         PreToolUseHandler preToolUseHandler = new InternalSettingsPermissionPreToolUseHandler(configManager);
+        StopHookHandler stopHookHandler = CommandStopHookHandler.fromSettings(
+                settings.resolvedHooks().stop(),
+                transcriptRecorder
+        );
 
         // 组装三层压缩器。
         CompactionManager compactionManager = null;
@@ -149,7 +154,7 @@ public class CodeFlow {
                 settings.maxIterations(),
                 toolPermissionManager,
                 preToolUseHandler,
-                new InternalValidationStopHookHandler(),
+                stopHookHandler,
                 memoryContextProvider,
                 compactionManager,
                 skillStore

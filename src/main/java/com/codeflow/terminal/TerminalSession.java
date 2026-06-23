@@ -780,8 +780,14 @@ public final class TerminalSession implements AutoCloseable {
         }
 
         builder.append("  Stop\n");
-        builder.append("    Handler: validation reminder\n");
-        builder.append("    Rule: blocks final replies that do not mention verification");
+        Settings.CommandHook stopHook = resolved.resolvedHooks().stop();
+        if (stopHook == null || !stopHook.enabled()) {
+            builder.append("    Handler: disabled\n");
+        } else {
+            builder.append("    Handler: command\n");
+            builder.append("    Command: ").append(stopHook.command()).append('\n');
+            builder.append("    Timeout: ").append(stopHook.resolvedTimeoutSeconds()).append("s\n");
+        }
         return builder.toString();
     }
 

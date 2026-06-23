@@ -2,6 +2,7 @@ package com.codeflow.config;
 
 import com.codeflow.permissions.PermissionMode;
 import com.codeflow.permissions.ToolPermission;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -21,9 +22,24 @@ public record Settings(
         @JsonProperty("max_iterations") Integer maxIterations,
         @JsonProperty("permission_mode") PermissionMode permissionMode,
         @JsonProperty("tool_permissions") Map<String, ToolPermission> toolPermissions,
-        @JsonProperty("compaction") Compaction compaction
+        @JsonProperty("compaction") Compaction compaction,
+        @JsonProperty("hooks") Hooks hooks
 ) {
     private static final String DEFAULT_MODEL_KEY = "A";
+
+    public Settings(
+            String apiKey,
+            String baseUrl,
+            String model,
+            Map<String, String> models,
+            Integer maxTokens,
+            Integer maxIterations,
+            PermissionMode permissionMode,
+            Map<String, ToolPermission> toolPermissions,
+            Compaction compaction
+    ) {
+        this(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions, compaction, null);
+    }
 
     /**
      * 默认配置
@@ -38,7 +54,8 @@ public record Settings(
                 25,
                 PermissionMode.ASK,
                 defaultToolPermissions(),
-                Compaction.defaults()
+                Compaction.defaults(),
+                Hooks.defaults()
         );
     }
 
@@ -55,16 +72,17 @@ public record Settings(
                 other.maxIterations != null ? other.maxIterations : this.maxIterations,
                 other.permissionMode != null ? other.permissionMode : this.permissionMode,
                 other.toolPermissions != null ? other.toolPermissions : this.toolPermissions,
-                other.compaction != null ? other.compaction : this.compaction
+                other.compaction != null ? other.compaction : this.compaction,
+                other.hooks != null ? resolvedHooks().merge(other.hooks) : this.hooks
         );
     }
 
     public Settings withModel(String model) {
-        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions, compaction);
+        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions, compaction, hooks);
     }
 
     public Settings withPermissionMode(PermissionMode permissionMode) {
-        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions, compaction);
+        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions, compaction, hooks);
     }
 
     public String resolvedModel() {
@@ -85,6 +103,10 @@ public record Settings(
 
     public Compaction resolvedCompaction() {
         return compaction == null ? Compaction.defaults() : compaction.mergeDefaults();
+    }
+
+    public Hooks resolvedHooks() {
+        return hooks == null ? Hooks.defaults() : hooks.mergeDefaults();
     }
 
     /**
@@ -185,6 +207,46 @@ public record Settings(
                     autoCompactHotMessages != null ? autoCompactHotMessages : defaults.autoCompactHotMessages,
                     reactiveCompactHotMessages != null ? reactiveCompactHotMessages : defaults.reactiveCompactHotMessages
             );
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Hooks(
+            @JsonProperty("Stop") @JsonAlias("stop") CommandHook stop
+    ) {
+        public static Hooks defaults() {
+            return new Hooks(null);
+        }
+
+        public Hooks mergeDefaults() {
+            return new Hooks(stop == null ? null : stop.mergeDefaults());
+        }
+
+        public Hooks merge(Hooks other) {
+            if (other == null) {
+                return this;
+            }
+            return new Hooks(other.stop != null ? other.stop : stop);
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CommandHook(
+            @JsonProperty("command") String command,
+            @JsonProperty("timeout_seconds") Integer timeoutSeconds
+    ) {
+        private static final int DEFAULT_TIMEOUT_SECONDS = 30;
+
+        public CommandHook mergeDefaults() {
+            return new CommandHook(command, timeoutSeconds);
+        }
+
+        public boolean enabled() {
+            return command != null && !command.isBlank();
+        }
+
+        public int resolvedTimeoutSeconds() {
+            return timeoutSeconds == null || timeoutSeconds <= 0 ? DEFAULT_TIMEOUT_SECONDS : timeoutSeconds;
         }
     }
 }

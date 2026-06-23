@@ -33,6 +33,7 @@ public final class TranscriptStore {
     private static final String CONFIG_DIR_NAME = ".codeflow";
     private static final String MEMORY_DIR_NAME = "memory";
     private static final String L5_DIR = "L5";
+    private static final String HOOKS_DIR = ".hooks";
     private static final String JSONL_EXTENSION = ".jsonl";
     private static final String SAFE_SESSION_ID_PATTERN = "[A-Za-z0-9_.-]+";
 
@@ -334,6 +335,43 @@ public final class TranscriptStore {
     public Path transcriptPath(String sessionId) {
         validateSessionId(sessionId);
         return sessionPath(sessionId);
+    }
+
+    public Path writeHookSnapshot(String sessionId, String hookEventName, List<Message> messages) throws IOException {
+        validateSessionId(sessionId);
+        String safeHookEventName = safeHookEventName(hookEventName);
+        Path hookDirectory = transcriptRoot.resolve(HOOKS_DIR);
+        Files.createDirectories(hookDirectory);
+
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        Path path = hookDirectory
+                .resolve(sessionId + "-" + safeHookEventName + "-" + suffix + JSONL_EXTENSION)
+                .normalize();
+
+        String cwd = Paths.get("").toAbsolutePath().normalize().toString();
+        StringBuilder lines = new StringBuilder();
+        String parentUuid = null;
+        if (messages != null) {
+            for (Message message : messages) {
+                if (message == null) {
+                    continue;
+                }
+                String uuid = UUID.randomUUID().toString();
+                TranscriptEntry entry = new TranscriptEntry(
+                        uuid,
+                        parentUuid,
+                        sessionId,
+                        OffsetDateTime.now().toString(),
+                        cwd,
+                        message
+                );
+                lines.append(objectMapper.writeValueAsString(toJson(entry))).append(System.lineSeparator());
+                parentUuid = uuid;
+            }
+        }
+
+        Files.writeString(path, lines.toString(), StandardOpenOption.CREATE_NEW);
+        return path;
     }
 
     /**
@@ -713,6 +751,13 @@ public final class TranscriptStore {
 
     private Path sessionPath(String sessionId) {
         return transcriptRoot.resolve(sessionId + JSONL_EXTENSION).normalize();
+    }
+
+    private String safeHookEventName(String hookEventName) {
+        if (hookEventName == null || hookEventName.isBlank()) {
+            return "Hook";
+        }
+        return hookEventName.replaceAll("[^A-Za-z0-9_.-]", "_");
     }
 
     private static Path defaultTranscriptRoot() {

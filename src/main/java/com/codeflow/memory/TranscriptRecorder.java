@@ -5,6 +5,7 @@ import com.codeflow.core.WorkingMemory;
 import com.codeflow.util.Console;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -42,6 +43,20 @@ public final class TranscriptRecorder {
             return "";
         }
         return transcriptStore.transcriptPath(sessionId).toString();
+    }
+
+    public String recordHookSnapshot(String hookEventName, List<Message> messages) {
+        if (!enabled()) {
+            return "";
+        }
+
+        try {
+            Path path = transcriptStore.writeHookSnapshot(sessionId, hookEventName, messages);
+            return path.toString();
+        } catch (IOException | IllegalArgumentException e) {
+            Console.warn("[Memory] 写入 hook transcript 快照失败，已回退到正式 transcript: " + e.getMessage());
+            return "";
+        }
     }
 
     public List<String> recordWithUuids(List<Message> messages) {

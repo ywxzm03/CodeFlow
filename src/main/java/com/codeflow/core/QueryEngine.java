@@ -294,7 +294,7 @@ public class QueryEngine {
 
             // 没有工具调用 -> 对话结束
             if (allToolUses.isEmpty()) {
-                StopHookResult stopHookResult = runStopHook(content, stopHookActive);
+                StopHookResult stopHookResult = runStopHook(content, stopHookActive, workingMemory.snapshot());
                 if (!stopHookActive && stopHookResult.blocked()) {
                     workingMemory.append(new Message.User(formatStopHookFeedback(stopHookResult.feedback()), true));
                     return null;
@@ -335,12 +335,13 @@ public class QueryEngine {
         }
     }
 
-    private StopHookResult runStopHook(String lastAssistantMessage, boolean stopHookActive) {
+    private StopHookResult runStopHook(String lastAssistantMessage, boolean stopHookActive, List<Message> messages) {
         StopHookResult result = stopHookHandler.handle(new StopHookInput(
                 lastAssistantMessage,
                 System.getProperty("user.dir"),
                 toolPermissionManager.permissionMode(),
-                stopHookActive
+                stopHookActive,
+                messages
         ));
         return result == null ? StopHookResult.allow() : result;
     }

@@ -8,6 +8,7 @@ import com.codeflow.compact.SnipCompactor;
 import com.codeflow.compact.TokenEstimator;
 import com.codeflow.hooks.PreToolUseResult;
 import com.codeflow.hooks.StopHookHandler;
+import com.codeflow.hooks.StopHookInput;
 import com.codeflow.hooks.StopHookResult;
 import com.codeflow.llm.LLMClient;
 import com.codeflow.memory.TranscriptRecorder;
@@ -29,6 +30,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -140,6 +142,34 @@ class QueryEngineWorkingMemoryTest {
         assertEquals(QueryEngine.QueryResult.StopReason.COMPLETED, result.stopReason());
         assertEquals("second", result.finalResponse());
         assertEquals(2, client.calls.size());
+    }
+
+    @Test
+    void stopHookReceivesCurrentWorkingMemorySnapshot() {
+        RecordingStreamingClient client = new RecordingStreamingClient(
+                Flux.just(new LLMClient.StreamEvent.TextDelta("done"))
+        );
+        AtomicReference<StopHookInput> captured = new AtomicReference<>();
+        QueryEngine queryEngine = new QueryEngine(
+                client,
+                List.of(),
+                3,
+                ToolPermissionManager.askByDefault(),
+                input -> PreToolUseResult.none(),
+                input -> {
+                    captured.set(input);
+                    return StopHookResult.allow();
+                },
+                null,
+                null
+        );
+
+        queryEngine.query("finish", new WorkingMemory());
+
+        assertEquals(
+                List.of(new Message.User("finish"), new Message.Assistant("done", List.of(), null)),
+                captured.get().messages()
+        );
     }
 
     @Test
