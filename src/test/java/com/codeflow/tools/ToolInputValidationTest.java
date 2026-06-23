@@ -2,7 +2,7 @@ package com.codeflow.tools;
 
 import com.codeflow.core.Message;
 import com.codeflow.core.StreamingToolExecutor;
-import com.codeflow.permissions.ToolPermissionManager;
+import com.codeflow.core.ToolAdmissionPolicy.ToolAdmissionResult;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -94,6 +94,7 @@ class ToolInputValidationTest {
     @Test
     void executorDoesNotRunToolWhenInputIsInvalid() {
         AtomicBoolean executed = new AtomicBoolean(false);
+        AtomicBoolean admissionChecked = new AtomicBoolean(false);
         Tool tool = new Tool() {
             @Override
             public String name() {
@@ -121,13 +122,20 @@ class ToolInputValidationTest {
                 return ValidationResult.invalid("bad input");
             }
         };
-        StreamingToolExecutor executor = new StreamingToolExecutor(List.of(tool), ToolPermissionManager.askByDefault());
+        StreamingToolExecutor executor = new StreamingToolExecutor(
+                List.of(tool),
+                toolUse -> {
+                    admissionChecked.set(true);
+                    return ToolAdmissionResult.allow();
+                }
+        );
 
         executor.addTool(new Message.ToolUse("toolu_test", "TestTool", "{}"));
         List<StreamingToolExecutor.ToolResult> results = executor.getRemainingResults();
         executor.shutdown();
 
         assertFalse(executed.get());
+        assertFalse(admissionChecked.get());
         assertTrue(results.getFirst().isError());
         assertTrue(results.getFirst().content().contains("工具参数无效: bad input"));
     }

@@ -1,10 +1,6 @@
 package com.codeflow.core;
 
-import com.codeflow.hooks.HookDecision;
 import com.codeflow.hooks.PreToolUseHandler;
-import com.codeflow.hooks.PreToolUseInput;
-import com.codeflow.hooks.PreToolUseResult;
-import com.codeflow.permissions.ToolPermission;
 import com.codeflow.permissions.ToolPermissionManager;
 import com.codeflow.tools.Tool;
 import com.codeflow.util.Console;
@@ -29,8 +25,7 @@ import java.util.concurrent.Executors;
 public class StreamingToolExecutor {
 
     private final List<Tool> toolDefinitions;
-    private final ToolPermissionManager toolPermissionManager;
-    private final PreToolUseHandler preToolUseHandler;
+    private final ToolAdmissionPolicy toolAdmissionPolicy;
     private final List<TrackedTool> tools;
     private final ExecutorService executorService;
     private volatile boolean hasErrored;
@@ -45,9 +40,15 @@ public class StreamingToolExecutor {
             ToolPermissionManager toolPermissionManager,
             PreToolUseHandler preToolUseHandler
     ) {
+        this(toolDefinitions, new DefaultToolAdmissionPolicy(toolPermissionManager, preToolUseHandler));
+    }
+
+    public StreamingToolExecutor(
+            List<Tool> toolDefinitions,
+            ToolAdmissionPolicy toolAdmissionPolicy
+    ) {
         this.toolDefinitions = Objects.requireNonNull(toolDefinitions, "toolDefinitions must not be null");
-        this.toolPermissionManager = Objects.requireNonNull(toolPermissionManager, "toolPermissionManager must not be null");
-        this.preToolUseHandler = preToolUseHandler == null ? PreToolUseHandler.none() : preToolUseHandler;
+        this.toolAdmissionPolicy = Objects.requireNonNull(toolAdmissionPolicy, "toolAdmissionPolicy must not be null");
         this.tools = new ArrayList<>();
         this.executorService = Executors.newCachedThreadPool();
         this.hasErrored = false;
@@ -64,65 +65,20 @@ public class StreamingToolExecutor {
 
         Tool toolDefinition = findTool(toolUse.name());
         if (toolDefinition == null) {
-            // 工具不存在，直接标记为完成并返回错误
-            TrackedTool tracked = new TrackedTool(
-                    toolUse.id(),
-                    toolUse.name(),
-                    toolUse.input(),
-                    false,
-                    ToolStatus.COMPLETED
-            );
-            tracked.result = Tool.ToolExecutionResult.error("工具不存在: " + toolUse.name());
-            tools.add(tracked);
-            notifyAll();  // 唤醒等待中的 getRemainingResults
+            completeWithError(toolUse, "工具不存在: " + toolUse.name());
             return;
         }
 
         Tool.ValidationResult validationResult = toolDefinition.validateInput(toolUse.input());
         if (!validationResult.allowed()) {
-            TrackedTool tracked = new TrackedTool(
-                    toolUse.id(),
-                    toolUse.name(),
-                    toolUse.input(),
-                    false,
-                    ToolStatus.COMPLETED
-            );
-            tracked.result = Tool.ToolExecutionResult.error("工具参数无效: " + validationResult.message());
-            tools.add(tracked);
-            notifyAll();
+            completeWithError(toolUse, "工具参数无效: " + validationResult.message());
             return;
         }
 
-        ToolPermission permission = permissionFor(toolUse);
-        if (permission == ToolPermission.DENY) {
-            TrackedTool tracked = new TrackedTool(
-                    toolUse.id(),
-                    toolUse.name(),
-                    toolUse.input(),
-                    false,
-                    ToolStatus.COMPLETED
-            );
-            tracked.result = Tool.ToolExecutionResult.error("工具权限拒绝: " + toolUse.name());
-            tools.add(tracked);
-            notifyAll();
+        ToolAdmissionPolicy.ToolAdmissionResult admissionResult = toolAdmissionPolicy.authorize(toolUse);
+        if (!admissionResult.allowed()) {
+            completeWithError(toolUse, admissionResult.errorMessage());
             return;
-        }
-
-        if (permission == ToolPermission.ASK) {
-            boolean confirmed = toolPermissionManager.confirm(toolUse.name(), toolUse.input());
-            if (!confirmed) {
-                TrackedTool tracked = new TrackedTool(
-                        toolUse.id(),
-                        toolUse.name(),
-                        toolUse.input(),
-                        false,
-                        ToolStatus.COMPLETED
-                );
-                tracked.result = Tool.ToolExecutionResult.error("工具未获得用户确认: " + toolUse.name());
-                tools.add(tracked);
-                notifyAll();
-                return;
-            }
         }
 
         boolean isConcurrencySafe = toolDefinition.isConcurrencySafe();
@@ -138,21 +94,17 @@ public class StreamingToolExecutor {
         processQueue();
     }
 
-    private ToolPermission permissionFor(Message.ToolUse toolUse) {
-        PreToolUseResult preToolUseResult = preToolUseHandler.handle(new PreToolUseInput(
+    private void completeWithError(Message.ToolUse toolUse, String errorMessage) {
+        TrackedTool tracked = new TrackedTool(
                 toolUse.id(),
                 toolUse.name(),
                 toolUse.input(),
-                System.getProperty("user.dir"),
-                toolPermissionManager.permissionMode()
-        ));
-        HookDecision decision = preToolUseResult == null ? HookDecision.NONE : preToolUseResult.decision();
-        return switch (decision) {
-            case ALLOW -> ToolPermission.ALLOW;
-            case ASK -> ToolPermission.ASK;
-            case DENY -> ToolPermission.DENY;
-            case NONE -> toolPermissionManager.permissionFor(toolUse.name());
-        };
+                false,
+                ToolStatus.COMPLETED
+        );
+        tracked.result = Tool.ToolExecutionResult.error(errorMessage);
+        tools.add(tracked);
+        notifyAll();
     }
 
     /**
