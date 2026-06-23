@@ -6,6 +6,13 @@ public record AgentDefinition(
         boolean background,
         boolean worktreeIsolation
 ) {
+    public static final AgentDefinition EXPLORER = new AgentDefinition(
+            "Explorer",
+            "Foreground by default read-only exploration subagent for searching and understanding code",
+            false,
+            false
+    );
+
     public static final AgentDefinition PLANNER = new AgentDefinition(
             "Planner",
             "Foreground planning subagent that researches and produces a batch plan",
@@ -19,4 +26,24 @@ public record AgentDefinition(
             true,
             true
     );
+
+    public static final AgentDefinition VERIFIER = new AgentDefinition(
+            "Verifier",
+            "Background by default verification subagent that proves changes work without editing source files",
+            true,
+            false
+    );
+
+    public static AgentDefinition byType(String type) {
+        if (type == null || type.isBlank()) {
+            return CODER;
+        }
+        return switch (type) {
+            case "Explorer" -> EXPLORER;
+            case "Planner" -> PLANNER;
+            case "Coder" -> CODER;
+            case "Verifier" -> VERIFIER;
+            default -> throw new IllegalArgumentException("Unknown subagent_type: " + type);
+        };
+    }
 }

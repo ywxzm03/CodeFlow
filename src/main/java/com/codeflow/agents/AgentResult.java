@@ -4,6 +4,7 @@ import java.nio.file.Path;
 
 public record AgentResult(
         String agentId,
+        String agentType,
         String batchId,
         String unitId,
         Status status,
@@ -11,6 +12,7 @@ public record AgentResult(
         String branchName,
         String commitSha,
         String testSummary,
+        String verdict,
         String resultSummary,
         String failureReason,
         Path worktreePath

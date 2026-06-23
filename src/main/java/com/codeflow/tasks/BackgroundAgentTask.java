@@ -9,7 +9,10 @@ public final class BackgroundAgentTask {
     private final String id;
     private final String batchId;
     private final String agentId;
+    private final String agentType;
+    private final String displayName;
     private final String unitId;
+    private final String targetAgentId;
     private final String description;
     private final CancellationToken cancellationToken;
 
@@ -22,13 +25,31 @@ public final class BackgroundAgentTask {
     private volatile Path logPath;
     private volatile String resultSummary;
     private volatile String testSummary;
+    private volatile String verdict;
     private volatile String failureReason;
 
     public BackgroundAgentTask(String id, String batchId, String agentId, String unitId, String description, Path logPath) {
+        this(id, batchId, agentId, "Coder", description, unitId, "", description, logPath);
+    }
+
+    public BackgroundAgentTask(
+            String id,
+            String batchId,
+            String agentId,
+            String agentType,
+            String displayName,
+            String unitId,
+            String targetAgentId,
+            String description,
+            Path logPath
+    ) {
         this.id = requireText(id, "id");
         this.batchId = requireText(batchId, "batchId");
         this.agentId = requireText(agentId, "agentId");
+        this.agentType = requireText(agentType, "agentType");
+        this.displayName = displayName == null || displayName.isBlank() ? this.agentType : displayName;
         this.unitId = requireText(unitId, "unitId");
+        this.targetAgentId = targetAgentId == null ? "" : targetAgentId;
         this.description = description == null ? "" : description;
         this.logPath = logPath;
         this.cancellationToken = CancellationToken.create();
@@ -47,8 +68,20 @@ public final class BackgroundAgentTask {
         return agentId;
     }
 
+    public String agentType() {
+        return agentType;
+    }
+
+    public String displayName() {
+        return displayName;
+    }
+
     public String unitId() {
         return unitId;
+    }
+
+    public String targetAgentId() {
+        return targetAgentId;
     }
 
     public String description() {
@@ -70,10 +103,15 @@ public final class BackgroundAgentTask {
     }
 
     public synchronized void markSuccess(String commitSha, String resultSummary, String testSummary) {
+        markSuccess(commitSha, resultSummary, testSummary, null);
+    }
+
+    public synchronized void markSuccess(String commitSha, String resultSummary, String testSummary, String verdict) {
         this.status = Status.SUCCESS;
         this.commitSha = commitSha;
         this.resultSummary = resultSummary;
         this.testSummary = testSummary;
+        this.verdict = verdict;
         this.completedAt = Instant.now();
     }
 
@@ -97,7 +135,10 @@ public final class BackgroundAgentTask {
                 id,
                 batchId,
                 agentId,
+                agentType,
+                displayName,
                 unitId,
+                targetAgentId,
                 description,
                 status,
                 worktreePath,
@@ -108,6 +149,7 @@ public final class BackgroundAgentTask {
                 logPath,
                 resultSummary,
                 testSummary,
+                verdict,
                 failureReason
         );
     }
@@ -131,7 +173,10 @@ public final class BackgroundAgentTask {
             String id,
             String batchId,
             String agentId,
+            String agentType,
+            String displayName,
             String unitId,
+            String targetAgentId,
             String description,
             Status status,
             Path worktreePath,
@@ -142,6 +187,7 @@ public final class BackgroundAgentTask {
             Path logPath,
             String resultSummary,
             String testSummary,
+            String verdict,
             String failureReason
     ) {
     }

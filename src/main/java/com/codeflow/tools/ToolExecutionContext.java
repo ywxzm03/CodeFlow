@@ -19,7 +19,9 @@ public record ToolExecutionContext(
         Path allowedRoot,
         PermissionMode permissionMode,
         String agentId,
-        String batchId
+        String batchId,
+        String agentType,
+        String targetAgentId
 ) {
     public ToolExecutionContext {
         cwd = normalize(cwd == null ? Paths.get(System.getProperty("user.dir")) : cwd);
@@ -33,17 +35,49 @@ public record ToolExecutionContext(
                 null,
                 PermissionMode.ASK,
                 null,
+                null,
+                null,
                 null
         );
     }
 
     public static ToolExecutionContext batchWorker(Path worktreePath, String agentId, String batchId) {
+        return subagentCoder(worktreePath, agentId, batchId);
+    }
+
+    public static ToolExecutionContext subagentReadOnly(Path cwd, String agentId, String batchId, String agentType) {
+        return new ToolExecutionContext(
+                cwd,
+                null,
+                PermissionMode.SUBAGENT_READ_ONLY,
+                agentId,
+                batchId,
+                agentType,
+                null
+        );
+    }
+
+    public static ToolExecutionContext subagentCoder(Path worktreePath, String agentId, String batchId) {
         return new ToolExecutionContext(
                 worktreePath,
                 worktreePath,
-                PermissionMode.BATCH_WORKER,
+                PermissionMode.SUBAGENT_CODER,
                 agentId,
-                batchId
+                batchId,
+                "Coder",
+                null
+        );
+    }
+
+    public static ToolExecutionContext subagentVerifier(Path cwd, Path allowedRoot, String agentId, String batchId, String targetAgentId) {
+        return new ToolExecutionContext(
+                cwd,
+                allowedRoot,
+                PermissionMode.SUBAGENT_VERIFIER,
+                agentId,
+                batchId,
+                "Verifier",
+                targetAgentId
         );
     }
 
@@ -71,26 +105,69 @@ public record ToolExecutionContext(
     }
 
     public boolean isBatchWorker() {
-        return permissionMode == PermissionMode.BATCH_WORKER;
+        return permissionMode == PermissionMode.BATCH_WORKER || permissionMode == PermissionMode.SUBAGENT_CODER;
+    }
+
+    public boolean isSubagentReadOnly() {
+        return permissionMode == PermissionMode.SUBAGENT_READ_ONLY;
+    }
+
+    public boolean isSubagentVerifier() {
+        return permissionMode == PermissionMode.SUBAGENT_VERIFIER;
+    }
+
+    public boolean isSubagentMode() {
+        return isBatchWorker() || isSubagentReadOnly() || isSubagentVerifier();
     }
 
     public void validateBashCommand(String command) {
-        if (!isBatchWorker()) {
+        if (!isSubagentMode()) {
             return;
         }
         String normalized = command == null ? "" : command.toLowerCase(Locale.ROOT);
         if (normalized.matches("(?s).*\\bgit\\s+push\\b.*")) {
-            throw new IllegalArgumentException("Batch workers cannot run git push");
+            throw new IllegalArgumentException("Subagents cannot run git push");
         }
         if (normalized.matches("(?s).*\\bgh\\s+pr\\s+create\\b.*")) {
-            throw new IllegalArgumentException("Batch workers cannot create pull requests");
+            throw new IllegalArgumentException("Subagents cannot create pull requests");
         }
         if (normalized.matches("(?s).*\\bgit\\s+(merge|cherry-pick)\\b.*")) {
-            throw new IllegalArgumentException("Batch workers cannot merge or cherry-pick");
+            throw new IllegalArgumentException("Subagents cannot merge or cherry-pick");
         }
+        if ((isSubagentReadOnly() || isSubagentVerifier()) && normalized.matches("(?s).*\\bgit\\s+(add|commit|reset|checkout|switch|branch|tag|stash|rebase|am|apply)\\b.*")) {
+            throw new IllegalArgumentException("Read-only subagents cannot run git write operations");
+        }
+        if (isSubagentReadOnly() && mutatesFilesystem(normalized)) {
+            throw new IllegalArgumentException("Read-only subagents cannot run filesystem mutation commands");
+        }
+        if (isSubagentVerifier() && mutatesSourceFilesystem(normalized)) {
+            throw new IllegalArgumentException("Verifier cannot run source mutation commands");
+        }
+    }
+
+    private static boolean mutatesFilesystem(String normalizedCommand) {
+        return normalizedCommand.matches("(?s).*(^|[;&|]\\s*)\\s*(mkdir|touch|rm|rmdir|mv|cp|install|npm\\s+install|pnpm\\s+install|yarn\\s+add|pip\\s+install|mvn\\s+install)\\b.*")
+                || normalizedCommand.contains(">")
+                || normalizedCommand.contains("<<");
+    }
+
+    private static boolean mutatesSourceFilesystem(String normalizedCommand) {
+        return normalizedCommand.matches("(?s).*(^|[;&|]\\s*)\\s*(rm|rmdir|mv|cp|touch|mkdir)\\b.*")
+                || normalizedCommand.contains(">")
+                || normalizedCommand.contains("<<");
     }
 
     private static Path normalize(Path path) {
         return path.toAbsolutePath().normalize();
+    }
+
+    public ToolExecutionContext(
+            Path cwd,
+            Path allowedRoot,
+            PermissionMode permissionMode,
+            String agentId,
+            String batchId
+    ) {
+        this(cwd, allowedRoot, permissionMode, agentId, batchId, null, null);
     }
 }

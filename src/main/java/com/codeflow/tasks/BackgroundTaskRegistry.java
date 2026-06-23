@@ -29,9 +29,31 @@ public final class BackgroundTaskRegistry {
     }
 
     public BackgroundAgentTask register(String batchId, String agentId, String unitId, String description) {
+        return register(batchId, agentId, "Coder", description, unitId, "", description);
+    }
+
+    public BackgroundAgentTask register(
+            String batchId,
+            String agentId,
+            String agentType,
+            String displayName,
+            String unitId,
+            String targetAgentId,
+            String description
+    ) {
         String taskId = agentId;
         Path logPath = agentLogPath(agentId);
-        BackgroundAgentTask task = new BackgroundAgentTask(taskId, batchId, agentId, unitId, description, logPath);
+        BackgroundAgentTask task = new BackgroundAgentTask(
+                taskId,
+                batchId,
+                agentId,
+                agentType,
+                displayName,
+                unitId,
+                targetAgentId,
+                description,
+                logPath
+        );
         tasks.put(taskId, task);
         persist(task);
         return task;
@@ -57,6 +79,14 @@ public final class BackgroundTaskRegistry {
                 .map(BackgroundAgentTask::snapshot)
                 .sorted(Comparator.comparing(BackgroundAgentTask.Snapshot::batchId)
                         .thenComparing(BackgroundAgentTask.Snapshot::unitId))
+                .toList();
+    }
+
+    public List<BackgroundAgentTask.Snapshot> listRunning() {
+        return tasks.values().stream()
+                .map(BackgroundAgentTask::snapshot)
+                .filter(task -> task.status() == BackgroundAgentTask.Status.QUEUED || task.status() == BackgroundAgentTask.Status.RUNNING)
+                .sorted(Comparator.comparing(BackgroundAgentTask.Snapshot::displayName))
                 .toList();
     }
 

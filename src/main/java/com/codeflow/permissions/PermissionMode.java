@@ -8,7 +8,10 @@ import java.util.Locale;
 public enum PermissionMode {
     ASK("ask", "Ask"),
     FULL_ACCESS("full_access", "Full Access"),
-    BATCH_WORKER("batch_worker", "Batch Worker");
+    BATCH_WORKER("batch_worker", "Batch Worker"),
+    SUBAGENT_READ_ONLY("subagent_read_only", "Subagent Read Only"),
+    SUBAGENT_CODER("subagent_coder", "Subagent Coder"),
+    SUBAGENT_VERIFIER("subagent_verifier", "Subagent Verifier");
 
     private final String configValue;
     private final String displayName;
@@ -28,8 +31,11 @@ public enum PermissionMode {
             case "ask" -> ASK;
             case "full_access" -> FULL_ACCESS;
             case "batch_worker" -> BATCH_WORKER;
+            case "subagent_read_only" -> SUBAGENT_READ_ONLY;
+            case "subagent_coder" -> SUBAGENT_CODER;
+            case "subagent_verifier" -> SUBAGENT_VERIFIER;
             default -> throw new IllegalArgumentException(
-                    "权限模式只能是 ask、full_access 或 batch_worker: " + value
+                    "权限模式只能是 ask、full_access、batch_worker、subagent_read_only、subagent_coder 或 subagent_verifier: " + value
             );
         };
     }
