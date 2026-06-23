@@ -65,4 +65,47 @@ class ToolPermissionConfigTest {
 
         assertEquals(PermissionMode.FULL_ACCESS, settings.permissionMode());
     }
+
+    @Test
+    void settingsReadsRoutingFromJson() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        Settings settings = objectMapper.readValue("""
+                {
+                  "api_key": "key",
+                  "base_url": "url",
+                  "model": "A",
+                  "max_tokens": 1000,
+                  "max_iterations": 5,
+                  "routing": {
+                    "enabled": false,
+                    "retry_current_model_once": false,
+                    "unhealthy_cooldown_seconds": 120
+                  }
+                }
+                """, Settings.class);
+
+        assertEquals(false, settings.resolvedRouting().enabled());
+        assertEquals(false, settings.resolvedRouting().retryCurrentModelOnce());
+        assertEquals(120, settings.resolvedRouting().unhealthyCooldownSeconds());
+    }
+
+    @Test
+    void routingCooldownMustBePositive() {
+        Settings settings = new Settings(
+                "key",
+                "url",
+                "A",
+                Settings.defaults().resolvedModels(),
+                1000,
+                5,
+                PermissionMode.ASK,
+                Map.of(),
+                Settings.Compaction.defaults(),
+                new Settings.Routing(true, true, 0),
+                Settings.Hooks.defaults()
+        );
+
+        assertEquals(false, settings.validate().valid());
+    }
 }

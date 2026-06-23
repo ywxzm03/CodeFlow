@@ -23,6 +23,7 @@ public record Settings(
         @JsonProperty("permission_mode") PermissionMode permissionMode,
         @JsonProperty("tool_permissions") Map<String, ToolPermission> toolPermissions,
         @JsonProperty("compaction") Compaction compaction,
+        @JsonProperty("routing") Routing routing,
         @JsonProperty("hooks") Hooks hooks
 ) {
     private static final String DEFAULT_MODEL_KEY = "A";
@@ -38,7 +39,7 @@ public record Settings(
             Map<String, ToolPermission> toolPermissions,
             Compaction compaction
     ) {
-        this(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions, compaction, null);
+        this(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions, compaction, null, null);
     }
 
     /**
@@ -55,6 +56,7 @@ public record Settings(
                 PermissionMode.ASK,
                 defaultToolPermissions(),
                 Compaction.defaults(),
+                Routing.defaults(),
                 Hooks.defaults()
         );
     }
@@ -73,16 +75,17 @@ public record Settings(
                 other.permissionMode != null ? other.permissionMode : this.permissionMode,
                 other.toolPermissions != null ? other.toolPermissions : this.toolPermissions,
                 other.compaction != null ? other.compaction : this.compaction,
+                other.routing != null ? other.routing : this.routing,
                 other.hooks != null ? resolvedHooks().merge(other.hooks) : this.hooks
         );
     }
 
     public Settings withModel(String model) {
-        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions, compaction, hooks);
+        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions, compaction, routing, hooks);
     }
 
     public Settings withPermissionMode(PermissionMode permissionMode) {
-        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions, compaction, hooks);
+        return new Settings(apiKey, baseUrl, model, models, maxTokens, maxIterations, permissionMode, toolPermissions, compaction, routing, hooks);
     }
 
     public String resolvedModel() {
@@ -107,6 +110,10 @@ public record Settings(
 
     public Hooks resolvedHooks() {
         return hooks == null ? Hooks.defaults() : hooks.mergeDefaults();
+    }
+
+    public Routing resolvedRouting() {
+        return routing == null ? Routing.defaults() : routing.mergeDefaults();
     }
 
     /**
@@ -149,6 +156,10 @@ public record Settings(
         }
         if (resolvedCompaction.reactiveCompactHotMessages() <= 0) {
             return ValidationResult.error("Compaction reactive_compact_hot_messages 必须大于0");
+        }
+        Routing resolvedRouting = resolvedRouting();
+        if (resolvedRouting.unhealthyCooldownSeconds() <= 0) {
+            return ValidationResult.error("Routing unhealthy_cooldown_seconds 必须大于0");
         }
         return ValidationResult.ok();
     }
@@ -206,6 +217,26 @@ public record Settings(
                     autoCompactThresholdRatio != null ? autoCompactThresholdRatio : defaults.autoCompactThresholdRatio,
                     autoCompactHotMessages != null ? autoCompactHotMessages : defaults.autoCompactHotMessages,
                     reactiveCompactHotMessages != null ? reactiveCompactHotMessages : defaults.reactiveCompactHotMessages
+            );
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Routing(
+            @JsonProperty("enabled") Boolean enabled,
+            @JsonProperty("retry_current_model_once") Boolean retryCurrentModelOnce,
+            @JsonProperty("unhealthy_cooldown_seconds") Integer unhealthyCooldownSeconds
+    ) {
+        public static Routing defaults() {
+            return new Routing(true, true, 300);
+        }
+
+        public Routing mergeDefaults() {
+            Routing defaults = defaults();
+            return new Routing(
+                    enabled != null ? enabled : defaults.enabled,
+                    retryCurrentModelOnce != null ? retryCurrentModelOnce : defaults.retryCurrentModelOnce,
+                    unhealthyCooldownSeconds != null ? unhealthyCooldownSeconds : defaults.unhealthyCooldownSeconds
             );
         }
     }
