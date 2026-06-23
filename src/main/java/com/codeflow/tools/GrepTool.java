@@ -78,6 +78,11 @@ public class GrepTool implements Tool {
 
     @Override
     public ToolExecutionResult execute(String input) {
+        return execute(input, ToolExecutionContext.defaultContext());
+    }
+
+    @Override
+    public ToolExecutionResult execute(String input, ToolExecutionContext context) {
         try {
             // 解析输入
             JsonNode inputNode = objectMapper.readTree(input);
@@ -86,6 +91,7 @@ public class GrepTool implements Tool {
             String outputMode = inputNode.has("output_mode") ? inputNode.get("output_mode").asText() : "files";
             boolean caseSensitive = !inputNode.has("case_sensitive") || inputNode.get("case_sensitive").asBoolean();
             String rootPath = inputNode.has("root") ? inputNode.get("root").asText() : System.getProperty("user.dir");
+            Path root = inputNode.has("root") ? context.resolvePath(rootPath) : context.cwd();
 
             // 编译正则表达式
             Pattern pattern;
@@ -96,7 +102,6 @@ public class GrepTool implements Tool {
                 return ToolExecutionResult.error("无效的正则表达式: " + e.getMessage());
             }
 
-            Path root = Paths.get(rootPath);
             if (!Files.exists(root)) {
                 return ToolExecutionResult.error("根目录不存在: " + rootPath);
             }

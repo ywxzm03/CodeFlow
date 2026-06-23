@@ -53,21 +53,38 @@ public class BashTool implements Tool {
 
     @Override
     public ToolExecutionResult execute(String input) {
-        return execute(input, CancellationToken.none());
+        return execute(input, ToolExecutionContext.defaultContext(), CancellationToken.none());
     }
 
     @Override
     public ToolExecutionResult execute(String input, CancellationToken cancellationToken) {
+        return execute(input, ToolExecutionContext.defaultContext(), cancellationToken);
+    }
+
+    @Override
+    public ToolExecutionResult execute(String input, ToolExecutionContext context) {
+        return execute(input, context, CancellationToken.none());
+    }
+
+    @Override
+    public ToolExecutionResult execute(
+            String input,
+            ToolExecutionContext context,
+            CancellationToken cancellationToken
+    ) {
         CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
+        ToolExecutionContext executionContext = context == null ? ToolExecutionContext.defaultContext() : context;
         Process process = null;
         try {
             token.throwIfCancelled();
             // 解析输入
             JsonNode inputNode = objectMapper.readTree(input);
             String command = inputNode.get("command").asText();
+            executionContext.validateBashCommand(command);
 
             // 执行命令
             ProcessBuilder processBuilder = new ProcessBuilder("/bin/bash", "-c", command);
+            processBuilder.directory(executionContext.cwd().toFile());
             processBuilder.redirectErrorStream(true);
 
             process = processBuilder.start();

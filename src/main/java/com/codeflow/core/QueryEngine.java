@@ -11,6 +11,7 @@ import com.codeflow.permissions.ToolPermissionManager;
 import com.codeflow.skills.SkillStore;
 import com.codeflow.tools.SkillTool;
 import com.codeflow.tools.Tool;
+import com.codeflow.tools.ToolExecutionContext;
 import com.codeflow.util.Console;
 
 import java.util.ArrayList;
@@ -53,6 +54,7 @@ public class QueryEngine {
     private final MemoryContextProvider memoryContextProvider;
     private final CompactionManager compactionManager;
     private final SkillStore skillStore;
+    private final ToolExecutionContext toolExecutionContext;
 
     public QueryEngine(
             LLMClient llmClient,
@@ -113,6 +115,21 @@ public class QueryEngine {
             CompactionManager compactionManager,
             SkillStore skillStore
     ) {
+        this(llmClient, tools, maxIterations, toolPermissionManager, preToolUseHandler, stopHookHandler, memoryContextProvider, compactionManager, skillStore, ToolExecutionContext.defaultContext());
+    }
+
+    public QueryEngine(
+            LLMClient llmClient,
+            List<Tool> tools,
+            int maxIterations,
+            ToolPermissionManager toolPermissionManager,
+            PreToolUseHandler preToolUseHandler,
+            StopHookHandler stopHookHandler,
+            MemoryContextProvider memoryContextProvider,
+            CompactionManager compactionManager,
+            SkillStore skillStore,
+            ToolExecutionContext toolExecutionContext
+    ) {
         this.llmClient = Objects.requireNonNull(llmClient, "llmClient must not be null");
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
         this.maxIterations = maxIterations;
@@ -122,6 +139,7 @@ public class QueryEngine {
         this.memoryContextProvider = memoryContextProvider;
         this.compactionManager = compactionManager;
         this.skillStore = skillStore;
+        this.toolExecutionContext = toolExecutionContext == null ? ToolExecutionContext.defaultContext() : toolExecutionContext;
     }
 
     /**
@@ -259,7 +277,12 @@ public class QueryEngine {
     ) {
         CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
         // 创建流式工具执行器
-        StreamingToolExecutor executor = new StreamingToolExecutor(tools, toolPermissionManager, preToolUseHandler, token);
+        StreamingToolExecutor executor = new StreamingToolExecutor(
+                tools,
+                new DefaultToolAdmissionPolicy(toolPermissionManager, preToolUseHandler),
+                token,
+                toolExecutionContext
+        );
         try {
             StringBuilder contentBuilder = new StringBuilder();
             List<Message.ToolUse> allToolUses = new ArrayList<>();
@@ -440,7 +463,7 @@ public class QueryEngine {
     private StopHookResult runStopHook(String lastAssistantMessage, boolean stopHookActive, List<Message> messages) {
         StopHookResult result = stopHookHandler.handle(new StopHookInput(
                 lastAssistantMessage,
-                System.getProperty("user.dir"),
+                toolExecutionContext.cwd().toString(),
                 toolPermissionManager.permissionMode(),
                 stopHookActive,
                 messages

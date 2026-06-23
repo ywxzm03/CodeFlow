@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Set;
 
 /**
@@ -53,6 +52,11 @@ public class WriteTool implements Tool {
 
     @Override
     public ToolExecutionResult execute(String input) {
+        return execute(input, ToolExecutionContext.defaultContext());
+    }
+
+    @Override
+    public ToolExecutionResult execute(String input, ToolExecutionContext context) {
         try {
             // 解析输入
             JsonNode inputNode = objectMapper.readTree(input);
@@ -60,7 +64,7 @@ public class WriteTool implements Tool {
             String content = inputNode.get("content").asText();
 
             // 写入文件
-            Path path = Paths.get(filePath);
+            Path path = context.resolvePath(filePath);
 
             // 创建父目录（如果不存在）
             Path parentDir = path.getParent();

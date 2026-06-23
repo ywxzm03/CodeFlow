@@ -3,6 +3,7 @@ package com.codeflow.core;
 import com.codeflow.hooks.PreToolUseHandler;
 import com.codeflow.permissions.ToolPermissionManager;
 import com.codeflow.tools.Tool;
+import com.codeflow.tools.ToolExecutionContext;
 import com.codeflow.util.Console;
 
 import java.util.ArrayList;
@@ -26,6 +27,7 @@ public class StreamingToolExecutor {
 
     private final List<Tool> toolDefinitions;
     private final ToolAdmissionPolicy toolAdmissionPolicy;
+    private final ToolExecutionContext toolExecutionContext;
     private final List<TrackedTool> tools;
     private final ExecutorService executorService;
     private final CancellationToken cancellationToken;
@@ -66,8 +68,18 @@ public class StreamingToolExecutor {
             ToolAdmissionPolicy toolAdmissionPolicy,
             CancellationToken cancellationToken
     ) {
+        this(toolDefinitions, toolAdmissionPolicy, cancellationToken, ToolExecutionContext.defaultContext());
+    }
+
+    public StreamingToolExecutor(
+            List<Tool> toolDefinitions,
+            ToolAdmissionPolicy toolAdmissionPolicy,
+            CancellationToken cancellationToken,
+            ToolExecutionContext toolExecutionContext
+    ) {
         this.toolDefinitions = Objects.requireNonNull(toolDefinitions, "toolDefinitions must not be null");
         this.toolAdmissionPolicy = Objects.requireNonNull(toolAdmissionPolicy, "toolAdmissionPolicy must not be null");
+        this.toolExecutionContext = toolExecutionContext == null ? ToolExecutionContext.defaultContext() : toolExecutionContext;
         this.cancellationToken = cancellationToken == null ? CancellationToken.none() : cancellationToken;
         this.tools = new ArrayList<>();
         this.executorService = Executors.newCachedThreadPool();
@@ -197,7 +209,7 @@ public class StreamingToolExecutor {
         CompletableFuture<Tool.ToolExecutionResult> future = CompletableFuture.supplyAsync(() -> {
             try {
                 Console.info("  [执行] " + tracked.toolName + " (id: " + tracked.toolUseId + ")");
-                return toolDefinition.execute(tracked.input, cancellationToken);
+                return toolDefinition.execute(tracked.input, toolExecutionContext, cancellationToken);
             } catch (UserCancelledException e) {
                 return Tool.ToolExecutionResult.error("Request interrupted by user");
             } catch (Exception e) {

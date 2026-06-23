@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Set;
 
 /**
@@ -49,13 +48,18 @@ public class ReadTool implements Tool {
 
     @Override
     public ToolExecutionResult execute(String input) {
+        return execute(input, ToolExecutionContext.defaultContext());
+    }
+
+    @Override
+    public ToolExecutionResult execute(String input, ToolExecutionContext context) {
         try {
             // 解析输入
             JsonNode inputNode = objectMapper.readTree(input);
             String filePath = inputNode.get("file_path").asText();
 
             // 读取文件
-            Path path = Paths.get(filePath);
+            Path path = context.resolvePath(filePath);
 
             if (!Files.exists(path)) {
                 return ToolExecutionResult.error("文件不存在: " + filePath);

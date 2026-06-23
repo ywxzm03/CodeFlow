@@ -30,10 +30,22 @@ public interface Tool {
      */
     ToolExecutionResult execute(String input);
 
+    default ToolExecutionResult execute(String input, ToolExecutionContext context) {
+        return execute(input);
+    }
+
     default ToolExecutionResult execute(String input, CancellationToken cancellationToken) {
+        return execute(input, ToolExecutionContext.defaultContext(), cancellationToken);
+    }
+
+    default ToolExecutionResult execute(
+            String input,
+            ToolExecutionContext context,
+            CancellationToken cancellationToken
+    ) {
         CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
         token.throwIfCancelled();
-        ToolExecutionResult result = execute(input);
+        ToolExecutionResult result = execute(input, context == null ? ToolExecutionContext.defaultContext() : context);
         token.throwIfCancelled();
         return result;
     }

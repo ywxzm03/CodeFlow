@@ -6,7 +6,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -73,6 +72,11 @@ public class EditTool implements Tool {
 
     @Override
     public ToolExecutionResult execute(String input) {
+        return execute(input, ToolExecutionContext.defaultContext());
+    }
+
+    @Override
+    public ToolExecutionResult execute(String input, ToolExecutionContext context) {
         try {
             // 解析输入
             JsonNode inputNode = objectMapper.readTree(input);
@@ -82,7 +86,7 @@ public class EditTool implements Tool {
             boolean replaceAll = inputNode.has("replace_all") && inputNode.get("replace_all").asBoolean();
 
             // 验证文件
-            Path path = Paths.get(filePath);
+            Path path = context.resolvePath(filePath);
             if (!Files.exists(path)) {
                 return ToolExecutionResult.error("文件不存在: " + filePath);
             }

@@ -69,6 +69,11 @@ public class GlobTool implements Tool {
 
     @Override
     public ToolExecutionResult execute(String input) {
+        return execute(input, ToolExecutionContext.defaultContext());
+    }
+
+    @Override
+    public ToolExecutionResult execute(String input, ToolExecutionContext context) {
         try {
             // 解析输入
             JsonNode inputNode = objectMapper.readTree(input);
@@ -84,7 +89,7 @@ public class GlobTool implements Tool {
                     ? inputNode.get("root").asText()
                     : System.getProperty("user.dir");
 
-            Path root = Paths.get(rootPath);
+            Path root = inputNode.has("root") ? context.resolvePath(rootPath) : context.cwd();
             if (!Files.exists(root)) {
                 return ToolExecutionResult.error("根目录不存在: " + rootPath);
             }
