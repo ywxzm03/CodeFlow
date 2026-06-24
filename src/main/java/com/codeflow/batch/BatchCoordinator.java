@@ -52,12 +52,14 @@ public final class BatchCoordinator {
         if (instruction == null || instruction.isBlank()) {
             throw new IllegalArgumentException("Provide an instruction for /batch.");
         }
+        // /batch 依赖 git：后续 Coder 要从同一仓库状态创建隔离 worktree。
         try {
             worktreeService.requireGitRoot();
         } catch (Exception e) {
             throw new IllegalStateException("/batch requires a git repository: " + e.getMessage(), e);
         }
 
+        // Planner 前台只读运行；用户确认 BatchPlan 后才会创建后台 Coder worktree。
         QueryEngine.QueryResult result = subagentRunner.runPlanner(plannerPrompt(instruction), cancellationToken);
         BatchPlan plan = BatchPlan.parsePlannerResponse(result.finalResponse(), instruction);
         plans.put(plan.batchId(), plan);
@@ -72,6 +74,7 @@ public final class BatchCoordinator {
         plans.put(plan.batchId(), plan);
         persistPlan(plan);
         for (BatchWorkUnit unit : plan.workUnits()) {
+            // 每个单元一个 Coder worktree；Verifier 只在对应 Coder 成功后启动。
             AgentInvocation coderInvocation = new AgentInvocation(
                     AgentDefinition.CODER,
                     plan.batchId(),
@@ -105,6 +108,7 @@ public final class BatchCoordinator {
         if (running.isEmpty()) {
             return "No running agents.";
         }
+        // /agent 只做运行态提示，不暴露 id、输出或取消入口。
         StringBuilder builder = new StringBuilder("Running agents:\n\n");
         for (BackgroundAgentTask.Snapshot task : running) {
             builder.append("- ").append(task.displayName()).append('\n');
@@ -164,6 +168,7 @@ public final class BatchCoordinator {
         StringBuilder builder = new StringBuilder();
         builder.append("# | Unit | Agent | Status | Branch | Commit | Verdict | Tests | Worktree\n");
         builder.append("--|------|-------|--------|--------|--------|---------|-------|---------\n");
+        // 同一单元分行展示 Coder 和 Verifier，区分实现结果和验证证据。
         List<BackgroundAgentTask.Snapshot> sorted = tasks.stream()
                 .sorted(Comparator.comparing(BackgroundAgentTask.Snapshot::unitId)
                         .thenComparing(BackgroundAgentTask.Snapshot::agentType))

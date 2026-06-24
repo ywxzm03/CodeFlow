@@ -23,6 +23,9 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 
+/**
+ * subagent 执行协调器，负责工具隔离、worktree 和后台任务状态。
+ */
 public final class SubagentRunner {
     private static final Set<String> READ_ONLY_TOOLS = Set.of("Read", "Grep", "Glob", "Bash");
     private static final Set<String> VERIFIER_TOOLS = Set.of("Read", "Grep", "Glob", "Bash");
@@ -58,10 +61,16 @@ public final class SubagentRunner {
                 .normalize();
     }
 
+    /**
+     * Planner 使用只读工具在前台运行。
+     */
     public QueryEngine.QueryResult runPlanner(String prompt, CancellationToken cancellationToken) {
         return runReadOnlyForeground(AgentDefinition.PLANNER, prompt, cancellationToken);
     }
 
+    /**
+     * Explorer 使用只读工具在前台运行。
+     */
     public QueryEngine.QueryResult runExplorer(String prompt, CancellationToken cancellationToken) {
         return runReadOnlyForeground(AgentDefinition.EXPLORER, prompt, cancellationToken);
     }
@@ -72,6 +81,8 @@ public final class SubagentRunner {
             WorktreeService worktreeService,
             CancellationToken cancellationToken
     ) {
+        // 前台/后台只影响等待方式，不改变安全边界。
+        // Coder 仍然走 worktree，只读 agent 仍然只拿只读工具。
         return switch (invocation.agent().type()) {
             case "Explorer", "Planner" -> runReadOnlyForeground(invocation.agent(), invocation.prompt(), cancellationToken);
             case "Coder" -> runCoderForeground(invocation, worktreeService, cancellationToken);
@@ -89,6 +100,9 @@ public final class SubagentRunner {
         return launchBackground(invocation, registry, worktreeService, executorService);
     }
 
+    /**
+     * 后台启动，返回任务句柄并异步执行。
+     */
     public BackgroundAgentTask launchBackground(
             AgentInvocation invocation,
             BackgroundTaskRegistry registry,
@@ -96,6 +110,7 @@ public final class SubagentRunner {
             ExecutorService executorService
     ) {
         String agentId = WorktreeService.newAgentId();
+        // 先注册再执行，让 /agent 和 /batch status 能立即看到排队任务。
         BackgroundAgentTask task = registry.register(
                 valueOr(invocation.batchId(), "manual"),
                 agentId,
@@ -109,6 +124,9 @@ public final class SubagentRunner {
         return task;
     }
 
+    /**
+     * /batch 使用的 Coder + Verifier 串联入口。
+     */
     public BackgroundAgentTask launchCoderWithVerifier(
             AgentInvocation coderInvocation,
             AgentInvocation verifierInvocation,
@@ -117,6 +135,7 @@ public final class SubagentRunner {
             ExecutorService executorService
     ) {
         String agentId = WorktreeService.newAgentId();
+        // /batch 使用成对启动：Coder 成功后自动把 worktree 交给 Verifier。
         BackgroundAgentTask task = registry.register(
                 valueOr(coderInvocation.batchId(), "manual"),
                 agentId,
@@ -145,6 +164,7 @@ public final class SubagentRunner {
             CancellationToken cancellationToken
     ) {
         try {
+            // 前台 Coder 也不直接改主目录，写入仍限制在临时 worktree。
             String agentId = WorktreeService.newAgentId();
             WorktreeSession worktreeSession = worktreeService.createAgentWorktree(agentId);
             ToolExecutionContext context = ToolExecutionContext.subagentCoder(
@@ -283,6 +303,7 @@ public final class SubagentRunner {
                 task.markSuccess(result.commitSha(), result.resultSummary(), result.testSummary());
                 registry.persist(task);
                 if (verifierInvocation != null) {
+                    // Verifier 通过 Coder 的 agentId 定位 worktree，并在其中验证。
                     AgentInvocation targetedVerifier = new AgentInvocation(
                             AgentDefinition.VERIFIER,
                             task.batchId(),
@@ -371,6 +392,7 @@ public final class SubagentRunner {
             ToolExecutionContext context,
             CancellationToken cancellationToken
     ) {
+        // Subagent 复用 QueryEngine；独立 WorkingMemory 避免共享主会话全文。
         QueryEngine queryEngine = new QueryEngine(
                 llmClient,
                 selectedTools,
@@ -386,6 +408,9 @@ public final class SubagentRunner {
         return queryEngine.query(prompt, new WorkingMemory(), cancellationToken);
     }
 
+    /**
+     * 只读 agent 只能使用搜索、读取和 Bash。
+     */
     private List<Tool> readOnlyTools() {
         return tools.stream()
                 .filter(tool -> READ_ONLY_TOOLS.contains(tool.name()))
@@ -393,6 +418,9 @@ public final class SubagentRunner {
                 .toList();
     }
 
+    /**
+     * Verifier 只验证，不修改源码。
+     */
     private List<Tool> verifierTools() {
         return tools.stream()
                 .filter(tool -> VERIFIER_TOOLS.contains(tool.name()))
@@ -404,6 +432,7 @@ public final class SubagentRunner {
         if (invocation.targetAgentId().isBlank()) {
             return new VerifierTarget(projectRoot);
         }
+        // /batch 的 Verifier 通过 target_agent_id 精确指向 Coder worktree。
         if (registry == null) {
             throw new IllegalArgumentException("target_agent_id requires background task registry");
         }

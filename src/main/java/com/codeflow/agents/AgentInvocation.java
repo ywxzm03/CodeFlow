@@ -1,5 +1,8 @@
 package com.codeflow.agents;
 
+/**
+ * 一次 subagent 调用请求。
+ */
 public record AgentInvocation(
         AgentDefinition agent,
         String batchId,
@@ -24,6 +27,9 @@ public record AgentInvocation(
         targetAgentId = targetAgentId == null ? "" : targetAgentId;
     }
 
+    /**
+     * 手动调用时使用 agent 默认前后台和隔离策略。
+     */
     public AgentInvocation(
             AgentDefinition agent,
             String batchId,
@@ -34,6 +40,9 @@ public record AgentInvocation(
         this(agent, batchId, unitId, prompt, description, agent.background(), agent.worktreeIsolation() ? "worktree" : "", "");
     }
 
+    /**
+     * 终端和任务列表展示用名称。
+     */
     public String displayName() {
         if (description != null && !description.isBlank()) {
             return description;

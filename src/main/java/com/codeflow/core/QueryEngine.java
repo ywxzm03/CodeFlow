@@ -155,6 +155,7 @@ public class QueryEngine {
         }
         CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
 
+        // 记录本轮起点，后续中断或流式失败时只回滚/返回当前 turn。
         int startIndex = workingMemory.size();
         Message.User userMessage = new Message.User(userInput);
         workingMemory.append(userMessage);
@@ -166,6 +167,7 @@ public class QueryEngine {
         while (iteration < maxIterations) {
             iteration++;
             if (token.isCancelled()) {
+                // 模型调用前已被取消时，写入一条合成用户消息，保留可解释的会话轨迹。
                 workingMemory.append(new Message.User(INTERRUPT_MESSAGE));
                 return cancelledResult(INTERRUPT_MESSAGE, workingMemory, turnState, iteration);
             }
@@ -177,6 +179,7 @@ public class QueryEngine {
             if (result != null) {
                 return result;
             }
+            // Stop hook 拒绝结束时会追加隐藏反馈，下一轮需要标记为 hook 重入。
             stopHookActive = lastMessageIsHiddenStopFeedback(workingMemory);
         }
 
@@ -307,6 +310,7 @@ public class QueryEngine {
                         .blockLast();
             } catch (RuntimeException streamError) {
                 if (isUserCancelled(streamError) || token.isCancelled()) {
+                    // 流式响应中断时，保留已经收到的 assistant/tool_use，并补齐取消结果。
                     return handleUserCancelledDuringStreaming(
                             workingMemory,
                             turnState,
@@ -354,6 +358,7 @@ public class QueryEngine {
             workingMemory.append(new Message.Assistant(content, allToolUses, usage.get()));
 
             if (token.isCancelled()) {
+                // assistant 消息已写入后再中断，需要给所有 tool_use 补 tool_result。
                 executor.cancel("Request interrupted by user");
                 appendToolResultsInOrder(workingMemory, allToolUses, executor.getRemainingResults(), "Request interrupted by user");
                 workingMemory.append(new Message.User(allToolUses.isEmpty() ? INTERRUPT_MESSAGE : INTERRUPT_MESSAGE_FOR_TOOL_USE));
@@ -382,6 +387,7 @@ public class QueryEngine {
             if (token.isCancelled()) {
                 executor.cancel("Request interrupted by user");
             }
+            // 即使工具被取消，也按原始 tool_use 顺序回填，避免消息结构不完整。
             appendToolResultsInOrder(workingMemory, allToolUses, executor.getRemainingResults(), "Request interrupted by user");
             if (token.isCancelled()) {
                 workingMemory.append(new Message.User(INTERRUPT_MESSAGE_FOR_TOOL_USE));
@@ -405,6 +411,7 @@ public class QueryEngine {
             Message.Usage usage,
             StreamingToolExecutor executor
     ) {
+        // 中断不是普通错误：尽量保留已接收内容，并把未完成工具标记为取消。
         executor.cancel("Request interrupted by user");
         if (!content.isEmpty() || !allToolUses.isEmpty()) {
             workingMemory.append(new Message.Assistant(content, allToolUses, usage));
@@ -427,6 +434,7 @@ public class QueryEngine {
         for (Message.ToolUse tu : toolUses) {
             StreamingToolExecutor.ToolResult result = resultsById.get(tu.id());
             if (result == null) {
+                // 模型发出的每个 tool_use 都必须有结果；缺失时补一条错误结果。
                 workingMemory.append(new Message.ToolResult(tu.id(), missingResultMessage, true));
                 continue;
             }

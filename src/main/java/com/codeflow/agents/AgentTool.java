@@ -11,6 +11,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 
+/**
+ * Agent 工具入口，负责校验参数并启动对应 subagent。
+ */
 public final class AgentTool implements Tool {
     public static final String TOOL_NAME = "Agent";
 
@@ -94,6 +97,9 @@ public final class AgentTool implements Tool {
         return execute(input, CancellationToken.none());
     }
 
+    /**
+     * 启动前台 agent 时同步等待；后台 agent 只返回任务 id。
+     */
     @Override
     public ToolExecutionResult execute(String input, CancellationToken cancellationToken) {
         try {
@@ -109,6 +115,7 @@ public final class AgentTool implements Tool {
             String targetAgentId = node.has("target_agent_id") ? node.get("target_agent_id").asText() : "";
             validateCombination(agent, isolation, targetAgentId);
 
+            // 参数校验后统一封装，避免前后台路径解析出不同默认值。
             AgentInvocation invocation = new AgentInvocation(
                     agent,
                     batchId,
@@ -217,6 +224,9 @@ public final class AgentTool implements Tool {
         }
     }
 
+    /**
+     * 校验 agent 类型、隔离模式、目标 agent 的组合约束。
+     */
     private static void validateCombination(AgentDefinition agent, String isolation, String targetAgentId) {
         if (AgentDefinition.CODER.type().equals(agent.type())) {
             if (!"worktree".equals(isolation)) {

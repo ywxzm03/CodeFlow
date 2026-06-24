@@ -11,6 +11,9 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
+/**
+ * Git worktree 管理服务，为 Coder 提供隔离工作目录。
+ */
 public final class WorktreeService {
     private static final Pattern SAFE_SLUG = Pattern.compile("[a-zA-Z0-9._-]+");
     private static final int MAX_SLUG_LENGTH = 64;
@@ -26,6 +29,9 @@ public final class WorktreeService {
         this.worktreesRoot = this.projectRoot.resolve(".codeflow").resolve("worktrees").normalize();
     }
 
+    /**
+     * 基于当前 HEAD 创建 agent 专属 worktree 和分支。
+     */
     public WorktreeSession createAgentWorktree(String agentId) throws IOException, InterruptedException {
         String normalizedAgentId = normalizeAgentId(agentId);
         String slug = "agent-" + normalizedAgentId;
@@ -40,6 +46,9 @@ public final class WorktreeService {
         return new WorktreeSession(agentId, slug, branchName, worktreePath, gitRoot, baseCommit);
     }
 
+    /**
+     * 返回项目所在 git 根目录。
+     */
     public Path requireGitRoot() throws IOException, InterruptedException {
         String root = runGit(projectRoot, "rev-parse", "--show-toplevel").strip();
         if (root.isBlank()) {
@@ -48,10 +57,16 @@ public final class WorktreeService {
         return Path.of(root).toAbsolutePath().normalize();
     }
 
+    /**
+     * 生成后台任务和 worktree 共用的 agent id。
+     */
     public static String newAgentId() {
         return UUID.randomUUID().toString();
     }
 
+    /**
+     * 限制 worktree 名称，防止路径穿越。
+     */
     static void validateSlug(String slug) {
         if (slug == null || slug.isBlank()) {
             throw new IllegalArgumentException("worktree slug must not be blank");
@@ -67,6 +82,9 @@ public final class WorktreeService {
         }
     }
 
+    /**
+     * 将任意 agent id 收敛成短、安全的文件名片段。
+     */
     private static String normalizeAgentId(String agentId) {
         String raw = agentId == null || agentId.isBlank() ? newAgentId() : agentId;
         String compact = raw.toLowerCase(Locale.ROOT).replaceAll("[^a-f0-9]", "");
@@ -79,6 +97,9 @@ public final class WorktreeService {
         return compact.substring(0, Math.min(12, compact.length()));
     }
 
+    /**
+     * 执行 git 命令并返回标准输出。
+     */
     private static String runGit(Path cwd, String... args) throws IOException, InterruptedException {
         ProcessBuilder builder = new ProcessBuilder(buildGitCommand(args));
         builder.directory(cwd.toFile());

@@ -5,6 +5,9 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 
+/**
+ * 将 subagent 文本回复解析为结构化结果。
+ */
 final class AgentResultParser {
     private AgentResultParser() {
     }
@@ -28,6 +31,7 @@ final class AgentResultParser {
             String expectedBranch,
             Path worktreePath
     ) {
+        // Coder 必须报告 commit，避免把未落盘变更当作成功。
         Map<String, String> fields = fields(finalResponse);
         String statusText = fields.getOrDefault("STATUS", "failed").trim().toLowerCase(Locale.ROOT);
         String commit = fields.getOrDefault("COMMIT", "none").trim();
@@ -70,6 +74,7 @@ final class AgentResultParser {
             String finalResponse,
             Path cwd
     ) {
+        // Explorer/Planner/Verifier 使用各自约定字段提取摘要。
         Map<String, String> fields = fields(finalResponse);
         String statusText = fields.getOrDefault("STATUS", "success").trim().toLowerCase(Locale.ROOT);
         String failureReason = fields.getOrDefault("FAILURE_REASON", "").trim();
@@ -115,6 +120,9 @@ final class AgentResultParser {
         );
     }
 
+    /**
+     * 解析 STATUS: success 这类单行字段。
+     */
     private static Map<String, String> fields(String text) {
         Map<String, String> fields = new LinkedHashMap<>();
         if (text == null || text.isBlank()) {

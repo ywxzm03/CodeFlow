@@ -1,5 +1,8 @@
 package com.codeflow.agents;
 
+/**
+ * 内置 subagent 类型及默认运行策略。
+ */
 public record AgentDefinition(
         String type,
         String description,
@@ -34,6 +37,9 @@ public record AgentDefinition(
             false
     );
 
+    /**
+     * 按模型传入的类型名解析 agent，缺省使用 Coder。
+     */
     public static AgentDefinition byType(String type) {
         if (type == null || type.isBlank()) {
             return CODER;

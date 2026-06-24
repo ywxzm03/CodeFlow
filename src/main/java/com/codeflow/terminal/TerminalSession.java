@@ -443,6 +443,7 @@ public final class TerminalSession implements AutoCloseable {
         CancellationToken token = CancellationToken.create();
         activeCancellation.set(token);
         AtomicBoolean printedInterrupt = new AtomicBoolean(false);
+        // 长任务放到后台线程执行，前台线程继续监听 Ctrl+C/Esc 并触发 token。
         CompletableFuture<T> future = CompletableFuture.supplyAsync(() -> {
             try {
                 return task.apply(token);
@@ -483,6 +484,7 @@ public final class TerminalSession implements AutoCloseable {
                     continue;
                 }
                 if (!rawMode) {
+                    // 进入 raw mode 后可以不等回车，直接捕获 Ctrl+C/Esc。
                     originalAttributes = terminal.enterRawMode();
                     rawMode = true;
                 }
@@ -492,6 +494,7 @@ public final class TerminalSession implements AutoCloseable {
                     continue;
                 }
                 if (character == 3 || character == 27) {
+                    // Ctrl+C 或 Esc 只取消当前任务；空闲状态下的退出由 handleIdleInterrupt 处理。
                     token.cancel(CancellationToken.USER_CANCEL);
                     if (printedInterrupt.compareAndSet(false, true)) {
                         terminal.writer().println();
