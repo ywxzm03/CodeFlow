@@ -125,7 +125,7 @@ public final class SubagentRunner {
     }
 
     /**
-     * /batch 使用的 Coder + Verifier 串联入口。
+     * 保留 Coder + Verifier 串联入口；当前 /batch 不再调用。
      */
     public BackgroundAgentTask launchCoderWithVerifier(
             AgentInvocation coderInvocation,
