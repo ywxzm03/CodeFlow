@@ -1,6 +1,7 @@
 package com.codeflow.app;
 
 import com.codeflow.agents.AgentTool;
+import com.codeflow.agents.AgentNotificationQueue;
 import com.codeflow.agents.SubagentRunner;
 import com.codeflow.batch.BatchCoordinator;
 import com.codeflow.config.ConfigManager;
@@ -146,6 +147,7 @@ public class CodeFlow {
         Path projectRoot = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
         List<Tool> subagentTools = List.copyOf(tools);
         BackgroundTaskRegistry backgroundTaskRegistry = new BackgroundTaskRegistry(projectRoot);
+        AgentNotificationQueue agentNotificationQueue = new AgentNotificationQueue();
         WorktreeService worktreeService = new WorktreeService(projectRoot);
         ExecutorService backgroundAgentExecutor = Executors.newCachedThreadPool();
         SubagentRunner subagentRunner = new SubagentRunner(
@@ -153,7 +155,8 @@ public class CodeFlow {
                 subagentTools,
                 settings.maxIterations(),
                 skillStore,
-                projectRoot
+                projectRoot,
+                agentNotificationQueue
         );
         BatchCoordinator batchCoordinator = new BatchCoordinator(
                 subagentRunner,
@@ -216,7 +219,8 @@ public class CodeFlow {
                 transcriptStore,
                 skillStore,
                 skillRenderer,
-                batchCoordinator
+                batchCoordinator,
+                agentNotificationQueue
         ).run();
     }
 

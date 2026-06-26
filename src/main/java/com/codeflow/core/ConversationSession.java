@@ -1,5 +1,6 @@
 package com.codeflow.core;
 
+import com.codeflow.agents.AgentNotification;
 import com.codeflow.memory.MemoryReflection;
 import com.codeflow.memory.TranscriptRecorder;
 
@@ -47,6 +48,26 @@ public final class ConversationSession {
         return result;
     }
 
+    public QueryEngine.QueryResult handleAgentNotifications(
+            List<AgentNotification> notifications,
+            CancellationToken cancellationToken
+    ) {
+        if (notifications == null || notifications.isEmpty()) {
+            throw new IllegalArgumentException("notifications must not be empty");
+        }
+        CancellationToken token = cancellationToken == null ? CancellationToken.none() : cancellationToken;
+        QueryEngine.QueryResult result = queryEngine.query(renderAgentNotificationPrompt(notifications), workingMemory, token);
+        transcriptRecorder.recordUnpersisted(workingMemory);
+        if (result.stopReason() == QueryEngine.QueryResult.StopReason.COMPLETED && memoryReflection != null) {
+            if (token == CancellationToken.none()) {
+                memoryReflection.reflect(result.turnMessages());
+            } else {
+                memoryReflection.reflect(result.turnMessages(), token);
+            }
+        }
+        return result;
+    }
+
     public void resume(String sessionId, List<WorkingMemory.Entry> entries) {
         transcriptRecorder.switchSession(sessionId);
         workingMemory.restore(entries);
@@ -70,5 +91,47 @@ public final class ConversationSession {
 
     public String transcriptSessionId() {
         return transcriptRecorder.sessionId();
+    }
+
+    private static String renderAgentNotificationPrompt(List<AgentNotification> notifications) {
+        StringBuilder builder = new StringBuilder("""
+                The following background subagents have completed. The user has not seen these worker results yet.
+                Summarize the results concisely for the user.
+                Do not relaunch equivalent subagents.
+                Do not invent details that are not present in the notifications.
+                If a task failed or was cancelled, say so clearly.
+                Prioritize VERDICT, TESTS, and commit when present.
+
+                <agent_notifications>
+                """);
+        for (AgentNotification notification : notifications) {
+            builder.append("<agent_notification>\n");
+            appendField(builder, "agentId", notification.agentId());
+            appendField(builder, "agentType", notification.agentType());
+            appendField(builder, "displayName", notification.displayName());
+            appendField(builder, "batchId", notification.batchId());
+            appendField(builder, "unitId", notification.unitId());
+            appendField(builder, "description", notification.description());
+            appendField(builder, "status", notification.status().name());
+            appendField(builder, "resultSummary", notification.resultSummary());
+            appendField(builder, "testSummary", notification.testSummary());
+            appendField(builder, "verdict", notification.verdict());
+            appendField(builder, "failureReason", notification.failureReason());
+            appendField(builder, "worktreePath", notification.worktreePath() == null ? "" : notification.worktreePath().toString());
+            appendField(builder, "branchName", notification.branchName());
+            appendField(builder, "commitSha", notification.commitSha());
+            appendField(builder, "logPath", notification.logPath() == null ? "" : notification.logPath().toString());
+            appendField(builder, "completedAt", notification.completedAt() == null ? "" : notification.completedAt().toString());
+            builder.append("</agent_notification>\n");
+        }
+        builder.append("</agent_notifications>");
+        return builder.toString();
+    }
+
+    private static void appendField(StringBuilder builder, String name, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        builder.append(name).append(": ").append(value).append('\n');
     }
 }

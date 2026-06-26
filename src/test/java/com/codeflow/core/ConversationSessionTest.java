@@ -1,13 +1,16 @@
 package com.codeflow.core;
 
+import com.codeflow.agents.AgentNotification;
 import com.codeflow.llm.LLMClient;
 import com.codeflow.memory.MemoryReflection;
 import com.codeflow.memory.TranscriptRecorder;
 import com.codeflow.permissions.ToolPermissionManager;
+import com.codeflow.tasks.BackgroundAgentTask;
 import com.codeflow.tools.Tool;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -15,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConversationSessionTest {
 
@@ -102,8 +106,47 @@ class ConversationSessionTest {
         assertEquals(0, session.workingMemory().size());
     }
 
+    @Test
+    void handlesAgentNotificationsThroughMainQueryEngine() {
+        StaticStreamingClient client = new StaticStreamingClient(Flux.just(new LLMClient.StreamEvent.TextDelta("Coder finished.")));
+        QueryEngine queryEngine = queryEngine(client, List.of(), 3);
+        ConversationSession session = new ConversationSession(queryEngine, null, TranscriptRecorder.disabled());
+
+        QueryEngine.QueryResult result = session.handleAgentNotifications(List.of(notification()), CancellationToken.none());
+
+        assertEquals(QueryEngine.QueryResult.StopReason.COMPLETED, result.stopReason());
+        assertEquals("Coder finished.", result.finalResponse());
+        assertEquals(2, session.workingMemory().size());
+        Message.User prompt = (Message.User) session.workingMemory().snapshot().getFirst();
+        assertTrue(prompt.content().contains("background subagents have completed"));
+        assertTrue(prompt.content().contains("agentId: agent-a"));
+        assertTrue(prompt.content().contains("commitSha: abc123"));
+        assertTrue(prompt.content().contains("verdict: PASS"));
+    }
+
     private QueryEngine queryEngine(LLMClient llmClient, List<Tool> tools, int maxIterations) {
         return new QueryEngine(llmClient, tools, maxIterations, ToolPermissionManager.askByDefault(), null, null);
+    }
+
+    private static AgentNotification notification() {
+        return new AgentNotification(
+                "agent-a",
+                "Coder",
+                "Unit 1",
+                "batch-1",
+                "unit-1",
+                "Do work",
+                BackgroundAgentTask.Status.SUCCESS,
+                "changed worker files",
+                "./gradlew test PASS",
+                "PASS",
+                "",
+                null,
+                "codeflow-agent-a",
+                "abc123",
+                null,
+                Instant.parse("2026-06-27T00:00:00Z")
+        );
     }
 
     private static final class StaticStreamingClient implements LLMClient {

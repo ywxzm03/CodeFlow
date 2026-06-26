@@ -1,5 +1,7 @@
 package com.codeflow.terminal;
 
+import com.codeflow.agents.AgentNotification;
+import com.codeflow.agents.AgentNotificationQueue;
 import com.codeflow.config.ConfigManager;
 import com.codeflow.config.Settings;
 import com.codeflow.batch.BatchCoordinator;
@@ -66,6 +68,7 @@ public final class TerminalSession implements AutoCloseable {
     private final SkillStore skillStore;
     private final SkillRenderer skillRenderer;
     private final BatchCoordinator batchCoordinator;
+    private final AgentNotificationQueue agentNotificationQueue;
     private final AtomicBoolean exitRequested = new AtomicBoolean(false);
     private final AtomicReference<CancellationToken> activeCancellation = new AtomicReference<>();
     private final AtomicBoolean promptActive = new AtomicBoolean(false);
@@ -88,7 +91,7 @@ public final class TerminalSession implements AutoCloseable {
             SkillStore skillStore,
             SkillRenderer skillRenderer
     ) {
-        this(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, transcriptRecorder, transcriptStore, skillStore, skillRenderer, null);
+        this(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, transcriptRecorder, transcriptStore, skillStore, skillRenderer, null, null);
     }
 
     public TerminalSession(
@@ -104,6 +107,23 @@ public final class TerminalSession implements AutoCloseable {
             SkillRenderer skillRenderer,
             BatchCoordinator batchCoordinator
     ) {
+        this(queryEngine, llmClient, configManager, settings, toolPermissionManager, memoryReflection, transcriptRecorder, transcriptStore, skillStore, skillRenderer, batchCoordinator, null);
+    }
+
+    public TerminalSession(
+            QueryEngine queryEngine,
+            LLMClient llmClient,
+            ConfigManager configManager,
+            Settings settings,
+            ToolPermissionManager toolPermissionManager,
+            MemoryReflection memoryReflection,
+            TranscriptRecorder transcriptRecorder,
+            TranscriptStore transcriptStore,
+            SkillStore skillStore,
+            SkillRenderer skillRenderer,
+            BatchCoordinator batchCoordinator,
+            AgentNotificationQueue agentNotificationQueue
+    ) {
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         TranscriptRecorder activeTranscriptRecorder = Objects.requireNonNull(transcriptRecorder, "transcriptRecorder must not be null");
         this.conversationSession = new ConversationSession(
@@ -116,6 +136,7 @@ public final class TerminalSession implements AutoCloseable {
         this.skillStore = skillStore;
         this.skillRenderer = skillRenderer;
         this.batchCoordinator = batchCoordinator;
+        this.agentNotificationQueue = agentNotificationQueue;
         this.slashCommands = SlashCommandRegistry.defaults(this.settings.resolvedModel(), skillStore);
         this.toolPermissionManager = Objects.requireNonNull(toolPermissionManager, "toolPermissionManager must not be null");
         this.transcriptStore = transcriptStore;
@@ -133,6 +154,7 @@ public final class TerminalSession implements AutoCloseable {
             reader = createReader(terminal);
 
             while (!exitRequested.get()) {
+                drainAgentNotificationsIfIdle();
                 String input;
                 try {
                     input = reader.readLine(PROMPT);
@@ -144,12 +166,35 @@ public final class TerminalSession implements AutoCloseable {
                 }
 
                 handleInput(input.trim());
+                drainAgentNotificationsIfIdle();
             }
         } catch (IOException e) {
             throw new IllegalStateException("Failed to start terminal session", e);
         } finally {
             close();
         }
+    }
+
+    private void drainAgentNotificationsIfIdle() {
+        if (agentNotificationQueue == null || terminal == null) {
+            return;
+        }
+        if (promptActive.get() || activeCancellation.get() != null) {
+            return;
+        }
+        List<AgentNotification> notifications = agentNotificationQueue.drainReady();
+        if (notifications.isEmpty()) {
+            return;
+        }
+        try {
+            QueryEngine.QueryResult result = runCancellableTask(token -> conversationSession.handleAgentNotifications(notifications, token));
+            if (result.stopReason() != QueryEngine.QueryResult.StopReason.USER_CANCELLED) {
+                terminal.writer().println(result.finalResponse());
+            }
+        } catch (Exception e) {
+            terminal.writer().println("Failed to summarize agent notifications: " + e.getMessage());
+        }
+        terminal.writer().flush();
     }
 
     private SlashLineReader createReader(Terminal terminal) {
