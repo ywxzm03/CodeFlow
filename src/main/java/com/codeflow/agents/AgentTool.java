@@ -75,7 +75,7 @@ public final class AgentTool implements Tool {
                     },
                     "run_in_background": {
                       "type": "boolean",
-                      "description": "Run the agent in the background. Defaults: Explorer/Planner foreground, Coder/Verifier background"
+                      "description": "Run the agent in the background. Defaults: Planner foreground, Explorer/Coder/Verifier background"
                     },
                     "isolation": {
                       "type": "string",

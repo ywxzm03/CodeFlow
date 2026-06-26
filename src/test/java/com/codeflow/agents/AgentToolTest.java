@@ -56,7 +56,7 @@ class AgentToolTest {
     }
 
     @Test
-    void foregroundExplorerReturnsResultImmediately() {
+    void explorerDefaultsToBackground() {
         AgentTool tool = agentTool("""
                 STATUS: success
                 SUMMARY: searched
@@ -66,6 +66,23 @@ class AgentToolTest {
 
         Tool.ToolExecutionResult result = tool.execute("""
                 {"subagent_type":"Explorer","prompt":"search"}
+                """);
+
+        assertFalse(result.isError());
+        assertTrue(result.content().contains("status: async_launched"));
+    }
+
+    @Test
+    void foregroundExplorerCanBeRequestedExplicitly() {
+        AgentTool tool = agentTool("""
+                STATUS: success
+                SUMMARY: searched
+                FINDINGS: done
+                FAILURE_REASON: none
+                """);
+
+        Tool.ToolExecutionResult result = tool.execute("""
+                {"subagent_type":"Explorer","prompt":"search","run_in_background":false}
                 """);
 
         assertFalse(result.isError());

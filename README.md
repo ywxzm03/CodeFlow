@@ -55,15 +55,15 @@ PermissionMode（ask / full_access）→ PreToolUse Hook 拦截 → 工具执行
 
 | 类型 | 默认模式 | Worktree 隔离 | 可用工具 | 职责 |
 |------|----------|:---:|------|------|
-| **Explorer** | 前台 | ✗ | Read, Grep, Glob, Bash | 只读搜索与代码理解，不修改文件 |
+| **Explorer** | 后台 | ✗ | Read, Grep, Glob, Bash | 只读搜索与代码理解，不修改文件 |
 | **Planner** | 前台 | ✗ | Read, Grep, Glob, Bash | 研究代码库并产出批量执行计划 |
 | **Coder** | 后台 | ✓ | 全部工具 | 在隔离的 git worktree 中编写代码 |
 | **Verifier** | 后台 | ✗ | Read, Grep, Glob, Bash | 验证 Coder 产出：运行测试、检查逻辑、审查变更 |
 
 #### 执行模式
 
-- **前台执行**（`run_in_background: false`）：主 Agent 阻塞等待子代理完成，结果直接返回给 LLM。适合 Explorer/Planner 等需要即时结果的场景
-- **后台执行**（`run_in_background: true`）：子代理异步运行，立即返回 `agentId`。主 Agent 可通过 `/agent` 查看状态。适合 Coder/Verifier 等耗时较长的编码和验证任务
+- **前台执行**（`run_in_background: false`）：主 Agent 阻塞等待子代理完成，结果直接返回给 LLM。适合 Planner 等需要即时结果的场景
+- **后台执行**（`run_in_background: true`）：子代理异步运行，立即返回 `agentId`。主 Agent 可通过 `/agent` 查看状态。适合 Explorer/Coder/Verifier 等耗时较长的搜索、编码和验证任务
 
 #### Coder + Verifier 对审流水线
 
@@ -92,7 +92,7 @@ LLM 通过 `Agent` 工具发起子代理调用，参数如下：
 | `prompt` | 是 | 子代理的完整任务描述，应该是自包含的 |
 | `subagent_type` | 否 | 类型：`Explorer` / `Planner` / `Coder` / `Verifier`，默认 `Coder` |
 | `description` | 否 | 简短任务描述，作为子代理的显示名称 |
-| `run_in_background` | 否 | 是否后台运行。Explorer/Planner 默认前台，Coder/Verifier 默认后台 |
+| `run_in_background` | 否 | 是否后台运行。Planner 默认前台，Explorer/Coder/Verifier 默认后台 |
 | `isolation` | 否 | 仅 Coder 支持 `"worktree"`，其他类型传入会报错 |
 | `target_agent_id` | 否 | 仅 Verifier 使用，指定要验证的 Coder 的 agentId |
 

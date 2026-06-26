@@ -11,8 +11,8 @@ public record AgentDefinition(
 ) {
     public static final AgentDefinition EXPLORER = new AgentDefinition(
             "Explorer",
-            "Foreground by default read-only exploration subagent for searching and understanding code",
-            false,
+            "Background by default read-only exploration subagent for searching and understanding code",
+            true,
             false
     );
 
