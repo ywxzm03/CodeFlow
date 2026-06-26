@@ -14,7 +14,6 @@ public record BatchPlan(
         String overallGoal,
         String findings,
         String validationRecipe,
-        String workerPromptTemplate,
         List<BatchWorkUnit> workUnits,
         Instant createdAt
 ) {
@@ -28,7 +27,6 @@ public record BatchPlan(
         overallGoal = overallGoal == null ? "" : overallGoal;
         findings = findings == null ? "" : findings;
         validationRecipe = validationRecipe == null ? "" : validationRecipe;
-        workerPromptTemplate = workerPromptTemplate == null ? "" : workerPromptTemplate;
         workUnits = workUnits == null ? List.of() : List.copyOf(workUnits);
         createdAt = createdAt == null ? Instant.now() : createdAt;
     }
@@ -46,7 +44,6 @@ public record BatchPlan(
                     textAnyOr(root, fallbackGoal, "overallGoal", "overall_goal"),
                     textAny(root, "findings"),
                     textAny(root, "validationRecipe", "validation_recipe"),
-                    textAny(root, "workerPromptTemplate", "worker_prompt_template"),
                     units,
                     Instant.now()
             );

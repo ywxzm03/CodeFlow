@@ -47,4 +47,18 @@ class BatchPlanTest {
 
         assertEquals("unit-1", plan.workUnits().getFirst().unitId());
     }
+
+    @Test
+    void ignoresLegacyWorkerPromptTemplateField() {
+        BatchPlan plan = BatchPlan.parsePlannerResponse("""
+                {
+                  "overallGoal": "goal",
+                  "workerPromptTemplate": "legacy",
+                  "workUnits": [{"title": "One"}]
+                }
+                """, "fallback");
+
+        assertEquals("goal", plan.overallGoal());
+        assertEquals(1, plan.workUnits().size());
+    }
 }

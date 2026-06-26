@@ -9,13 +9,17 @@ import com.codeflow.tools.GrepTool;
 import com.codeflow.tools.ReadTool;
 import com.codeflow.tools.Tool;
 import com.codeflow.worktree.WorktreeService;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import reactor.core.publisher.Flux;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -24,6 +28,16 @@ class AgentToolTest {
 
     @TempDir
     Path tempDir;
+
+    private final List<ExecutorService> executors = new ArrayList<>();
+
+    @AfterEach
+    void shutdownExecutors() throws Exception {
+        for (ExecutorService executor : executors) {
+            executor.shutdown();
+            assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
+        }
+    }
 
     @Test
     void acceptsAllBuiltInAgentTypes() {
@@ -109,11 +123,13 @@ class AgentToolTest {
 
     private AgentTool agentTool(String response) {
         BackgroundTaskRegistry registry = new BackgroundTaskRegistry(tempDir);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        executors.add(executor);
         return new AgentTool(
                 new SubagentRunner(new StubClient(response), tools(), 1, null, tempDir),
                 registry,
                 new WorktreeService(tempDir),
-                Executors.newSingleThreadExecutor()
+                executor
         );
     }
 

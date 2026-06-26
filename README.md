@@ -55,32 +55,32 @@ PermissionMode（ask / full_access）→ PreToolUse Hook 拦截 → 工具执行
 
 | 类型 | 默认模式 | Worktree 隔离 | 可用工具 | 职责 |
 |------|----------|:---:|------|------|
-| **Explorer** | 后台 | ✗ | Read, Grep, Glob, Bash | 只读搜索与代码理解，不修改文件 |
-| **Planner** | 前台 | ✗ | Read, Grep, Glob, Bash | 研究代码库并产出批量执行计划 |
+| **Explorer** | 后台 | ✗ | Read, Grep, Glob, Bash, Skill, MemoryRead | 只读搜索与代码理解，不修改文件 |
+| **Planner** | 前台 | ✗ | Read, Grep, Glob, Bash, Skill, MemoryRead | 研究代码库并产出批量执行计划 |
 | **Coder** | 后台 | ✓ | 全部工具 | 在隔离的 git worktree 中编写代码 |
-| **Verifier** | 后台 | ✗ | Read, Grep, Glob, Bash | 验证 Coder 产出：运行测试、检查逻辑、审查变更 |
+| **Verifier** | 后台 | ✗ | Read, Grep, Glob, Bash, Skill, MemoryRead | 验证代码产出：运行测试、检查逻辑、审查变更 |
 
 #### 执行模式
 
 - **前台执行**（`run_in_background: false`）：主 Agent 阻塞等待子代理完成，结果直接返回给 LLM。适合 Planner 等需要即时结果的场景
 - **后台执行**（`run_in_background: true`）：子代理异步运行，立即返回 `agentId`。主 Agent 可通过 `/agent` 查看状态。适合 Explorer/Coder/Verifier 等耗时较长的搜索、编码和验证任务
 
-#### Coder + Verifier 对审流水线
+#### Batch Coder 自验证流水线
 
 这是 CodeFlow 批量代码生成的核心质量保障机制：
 
 ```
 1. Planner/用户 拆解任务 → 生成 BatchPlan（多个 BatchWorkUnit）
 2. 每个 WorkUnit 启动一个 Coder（后台，独立 worktree）
-3. Coder 完成后自动触发 Verifier（后台，读取 Coder 的 worktree 只读验证）
-4. Verifier 产出 verdict（通过/失败）和 testSummary
+3. Coder 在 worktree 中实现、运行验证命令、产出 verdict 和 testSummary
+4. Coder 只有在验证通过后才创建本地提交并标记成功
 5. 后台子代理完成后结果记录在 `BackgroundTaskRegistry`，主 Agent 可在后续轮次中获取
 ```
 
 关键设计：
 - **Coder 必须运行在 worktree 隔离环境**：每个 Coder 获得独立的 git worktree，避免并行任务相互覆盖文件
-- **Verifier 只读访问 Coder worktree**：Verifier 只能使用 Read/Grep/Glob/Bash，不能修改任何文件，确保验证的客观性
-- **自动串联**：Coder 完成后自动启动 Verifier，无需主 Agent 介入。若未配置 Verifier，Coder 完成即结束
+- **Coder 自带验证职责**：Coder 必须运行验证命令并报告 `VERDICT: PASS|FAIL|PARTIAL`
+- **独立 Verifier 仍可用**：用户或模型可以通过 `Agent` 工具单独拉起 Verifier 验证当前项目或某个 Coder worktree
 - **取消传播**：用户 Ctrl+C 打断主 Agent 时，后台子代理也会收到取消信号
 
 #### Agent 工具调用参数
@@ -100,8 +100,9 @@ LLM 通过 `Agent` 工具发起子代理调用，参数如下：
 
 每个子代理类型的工具集是硬编码的，不受主 Agent 权限配置影响：
 
-- **Explorer / Planner**：`Read`、`Grep`、`Glob`、`Bash`（只读四件套）
-- **Verifier**：同上，确保只读验证
+- **Explorer / Planner**：`Read`、`Grep`、`Glob`、`Bash`、`Skill`、`MemoryRead`，但仍受只读权限约束
+- **Verifier**：同样可使用 `Read`、`Grep`、`Glob`、`Bash`、`Skill`、`MemoryRead`
+- **Verifier**：不能修改源码，确保只读验证
 - **Coder**：继承主 Agent 的全部工具（因为需要在 worktree 中自由编写代码）
 
 子代理内部也有独立的权限管控和迭代上限，但其 PreToolUse/Stop Hook 均被禁用（`none()`），避免子代理执行时弹出交互式确认。

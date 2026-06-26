@@ -74,7 +74,7 @@ public final class BatchCoordinator {
         plans.put(plan.batchId(), plan);
         persistPlan(plan);
         for (BatchWorkUnit unit : plan.workUnits()) {
-            // 每个单元一个 Coder worktree；Verifier 只在对应 Coder 成功后启动。
+            // 每个单元一个 Coder worktree；Coder 同时负责实现和验证。
             AgentInvocation coderInvocation = new AgentInvocation(
                     AgentDefinition.CODER,
                     plan.batchId(),
@@ -82,19 +82,8 @@ public final class BatchCoordinator {
                     coderPrompt(plan, unit),
                     unit.title()
             );
-            AgentInvocation verifierInvocation = new AgentInvocation(
-                    AgentDefinition.VERIFIER,
-                    plan.batchId(),
-                    unit.unitId(),
-                    verifierPrompt(plan, unit),
-                    "Verify " + unit.title(),
-                    true,
-                    "",
-                    ""
-            );
-            subagentRunner.launchCoderWithVerifier(
+            subagentRunner.launchCoder(
                     coderInvocation,
-                    verifierInvocation,
                     taskRegistry,
                     worktreeService,
                     executorService
@@ -168,7 +157,7 @@ public final class BatchCoordinator {
         StringBuilder builder = new StringBuilder();
         builder.append("# | Unit | Agent | Status | Branch | Commit | Verdict | Tests | Worktree\n");
         builder.append("--|------|-------|--------|--------|--------|---------|-------|---------\n");
-        // 同一单元分行展示 Coder 和 Verifier，区分实现结果和验证证据。
+        // 每个单元一行；Coder 自身报告验证结论。
         List<BackgroundAgentTask.Snapshot> sorted = tasks.stream()
                 .sorted(Comparator.comparing(BackgroundAgentTask.Snapshot::unitId)
                         .thenComparing(BackgroundAgentTask.Snapshot::agentType))
@@ -212,7 +201,6 @@ public final class BatchCoordinator {
                   "overallGoal": "...",
                   "findings": "...",
                   "validationRecipe": "...",
-                  "workerPromptTemplate": "...",
                   "workUnits": [
                     {
                       "unitId": "unit-1",
@@ -264,8 +252,9 @@ public final class BatchCoordinator {
                 STATUS: success|failed
                 BRANCH: <branch name>
                 COMMIT: <sha or none>
+                VERDICT: PASS|FAIL|PARTIAL
                 TESTS: <commands and results>
-                SUMMARY: <short change summary>
+                SUMMARY: <short change summary and validation evidence>
                 FAILURE_REASON: <reason or none>
                 """.formatted(
                 plan.overallGoal(),
@@ -273,44 +262,6 @@ public final class BatchCoordinator {
                 unit.unitId(),
                 unit.description(),
                 unit.targetFilesOrDirectories().isEmpty() ? "-" : String.join(", ", unit.targetFilesOrDirectories()),
-                unit.expectedChange(),
-                unit.validationInstructions().isBlank() ? plan.validationRecipe() : unit.validationInstructions()
-        );
-    }
-
-    private static String verifierPrompt(BatchPlan plan, BatchWorkUnit unit) {
-        return """
-                You are Verifier, an independent verification subagent for CodeFlow.
-
-                Verify the completed Coder work for this batch unit. You are running in the Coder worktree.
-                Do not modify project source files. Do not commit, push, create PRs, merge, or cherry-pick.
-                You may run build, test, lint, typecheck, and read-only inspection commands.
-
-                Overall batch goal:
-                %s
-
-                Unit:
-                %s (%s)
-
-                Expected change:
-                %s
-
-                Validation recipe:
-                %s
-
-                Run concrete verification commands and inspect the results. Try at least one edge or regression-oriented check when practical.
-
-                End with exactly these fields:
-                STATUS: success|failed
-                VERDICT: PASS|FAIL|PARTIAL
-                COMMANDS: <commands run>
-                EVIDENCE: <important outputs>
-                SUMMARY: <short verification summary>
-                FAILURE_REASON: <reason or none>
-                """.formatted(
-                plan.overallGoal(),
-                unit.title(),
-                unit.unitId(),
                 unit.expectedChange(),
                 unit.validationInstructions().isBlank() ? plan.validationRecipe() : unit.validationInstructions()
         );

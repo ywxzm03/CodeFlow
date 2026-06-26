@@ -35,26 +35,17 @@ class BatchCoordinatorTest {
     Path tempDir;
 
     @Test
-    void launchesVerifierAfterSuccessfulCoder() throws Exception {
+    void launchesSingleCoderThatReportsVerdict() throws Exception {
         initRepo(tempDir);
-        SequentialClient client = new SequentialClient(List.of(
-                """
-                        STATUS: success
-                        BRANCH: codeflow-agent-a
-                        COMMIT: abc123
-                        TESTS: ./gradlew test PASS
-                        SUMMARY: implemented unit
-                        FAILURE_REASON: none
-                        """,
-                """
-                        STATUS: success
-                        VERDICT: PASS
-                        COMMANDS: ./gradlew test
-                        EVIDENCE: tests passed
-                        SUMMARY: verified unit
-                        FAILURE_REASON: none
-                        """
-        ));
+        SequentialClient client = new SequentialClient(List.of("""
+                STATUS: success
+                BRANCH: codeflow-agent-a
+                COMMIT: abc123
+                VERDICT: PASS
+                TESTS: ./gradlew test PASS
+                SUMMARY: implemented and verified unit
+                FAILURE_REASON: none
+                """));
         BackgroundTaskRegistry registry = new BackgroundTaskRegistry(tempDir);
         var executor = Executors.newCachedThreadPool();
         BatchCoordinator coordinator = coordinator(client, registry, executor);
@@ -64,17 +55,15 @@ class BatchCoordinatorTest {
         executor.shutdown();
         assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
         List<BackgroundAgentTask.Snapshot> tasks = registry.listBatch("batch-test");
-        assertEquals(2, tasks.size());
+        assertEquals(1, tasks.size());
 
         BackgroundAgentTask.Snapshot coder = taskOfType(tasks, "Coder");
-        BackgroundAgentTask.Snapshot verifier = taskOfType(tasks, "Verifier");
         assertEquals(BackgroundAgentTask.Status.SUCCESS, coder.status());
         assertEquals("abc123", coder.commitSha());
-        assertEquals(BackgroundAgentTask.Status.SUCCESS, verifier.status());
-        assertEquals("PASS", verifier.verdict());
-        assertEquals(coder.agentId(), verifier.targetAgentId());
-        assertEquals(coder.worktreePath(), verifier.worktreePath());
-        assertTrue(coordinator.formatStatus("batch-test").contains("Verifier"));
+        assertEquals("PASS", coder.verdict());
+        String persistedPlan = Files.readString(tempDir.resolve(".codeflow/tasks/batches/batch-test.json"));
+        assertTrue(!persistedPlan.contains("workerPromptTemplate"));
+        assertTrue(coordinator.formatStatus("batch-test").contains("Coder"));
         assertTrue(coordinator.formatStatus("batch-test").contains("PASS"));
     }
 
@@ -84,6 +73,7 @@ class BatchCoordinatorTest {
         SequentialClient client = new SequentialClient(List.of("""
                 STATUS: failed
                 COMMIT: none
+                VERDICT: FAIL
                 TESTS: ./gradlew test FAIL
                 SUMMARY: failed unit
                 FAILURE_REASON: tests failed
@@ -129,7 +119,6 @@ class BatchCoordinatorTest {
                 "test batch",
                 "findings",
                 "./gradlew test",
-                "",
                 List.of(new BatchWorkUnit(
                         "unit-1",
                         "Unit 1",
