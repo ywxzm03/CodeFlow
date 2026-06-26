@@ -27,8 +27,8 @@ import java.util.concurrent.ExecutorService;
  * subagent 执行协调器，负责工具隔离、worktree 和后台任务状态。
  */
 public final class SubagentRunner {
-    private static final Set<String> READ_ONLY_TOOLS = Set.of("Read", "Grep", "Glob", "Bash");
-    private static final Set<String> VERIFIER_TOOLS = Set.of("Read", "Grep", "Glob", "Bash");
+    private static final Set<String> READ_ONLY_TOOLS = Set.of("Read", "Grep", "Glob", "Bash", "Skill", "MemoryRead");
+    private static final Set<String> VERIFIER_TOOLS = Set.of("Read", "Grep", "Glob", "Bash", "Skill", "MemoryRead");
 
     private final LLMClient llmClient;
     private final List<Tool> tools;
@@ -155,7 +155,7 @@ public final class SubagentRunner {
             CancellationToken cancellationToken
     ) {
         ToolExecutionContext context = ToolExecutionContext.subagentReadOnly(projectRoot, null, null, agent.type());
-        return query(prompt, readOnlyTools(), context, cancellationToken);
+        return query(agent, prompt, readOnlyTools(), context, cancellationToken);
     }
 
     private QueryEngine.QueryResult runCoderForeground(
@@ -172,7 +172,7 @@ public final class SubagentRunner {
                     agentId,
                     valueOr(invocation.batchId(), "manual")
             );
-            return query(invocation.prompt(), tools, context, cancellationToken);
+            return query(invocation.agent(), invocation.prompt(), tools, context, cancellationToken);
         } catch (Exception e) {
             throw new IllegalStateException("Coder foreground run failed: " + e.getMessage(), e);
         }
@@ -191,7 +191,7 @@ public final class SubagentRunner {
                 valueOr(invocation.batchId(), "manual"),
                 invocation.targetAgentId()
         );
-        return query(invocation.prompt(), verifierTools(), context, cancellationToken);
+        return query(invocation.agent(), invocation.prompt(), verifierTools(), context, cancellationToken);
     }
 
     private void runBackground(
@@ -227,6 +227,7 @@ public final class SubagentRunner {
                     invocation.agent().type()
             );
             QueryEngine.QueryResult queryResult = query(
+                    invocation.agent(),
                     invocation.prompt(),
                     readOnlyTools(),
                     context,
@@ -278,6 +279,7 @@ public final class SubagentRunner {
                     task.batchId()
             );
             QueryEngine.QueryResult queryResult = query(
+                    invocation.agent(),
                     invocation.prompt(),
                     tools,
                     context,
@@ -300,7 +302,7 @@ public final class SubagentRunner {
                     worktreeSession.worktreePath()
             );
             if (result.status() == AgentResult.Status.SUCCESS) {
-                task.markSuccess(result.commitSha(), result.resultSummary(), result.testSummary());
+                task.markSuccess(result.commitSha(), result.resultSummary(), result.testSummary(), result.verdict());
                 registry.persist(task);
                 if (verifierInvocation != null) {
                     // Verifier 通过 Coder 的 agentId 定位 worktree，并在其中验证。
@@ -354,6 +356,7 @@ public final class SubagentRunner {
                     invocation.targetAgentId()
             );
             QueryEngine.QueryResult queryResult = query(
+                    invocation.agent(),
                     invocation.prompt(),
                     verifierTools(),
                     context,
@@ -387,6 +390,7 @@ public final class SubagentRunner {
     }
 
     private QueryEngine.QueryResult query(
+            AgentDefinition agent,
             String prompt,
             List<Tool> selectedTools,
             ToolExecutionContext context,
@@ -403,7 +407,8 @@ public final class SubagentRunner {
                 null,
                 null,
                 skillStore,
-                context
+                context,
+                systemPromptFor(agent)
         );
         return queryEngine.query(prompt, new WorkingMemory(), cancellationToken);
     }
@@ -454,7 +459,37 @@ public final class SubagentRunner {
             case "Grep" -> 1;
             case "Glob" -> 2;
             case "Bash" -> 3;
+            case "Skill" -> 4;
+            case "MemoryRead" -> 5;
             default -> 10;
+        };
+    }
+
+    private static String systemPromptFor(AgentDefinition agent) {
+        return switch (agent.type()) {
+            case "Explorer" -> """
+                    You are Explorer, a CodeFlow subagent focused on read-only codebase exploration.
+                    Search, inspect, and summarize facts from the project. Use Skill and MemoryRead when they help.
+                    Do not modify files, create commits, push, create pull requests, merge, cherry-pick, or start other agents.
+                    Return concise findings with paths when useful.
+                    """;
+            case "Planner" -> """
+                    You are Planner, a CodeFlow subagent focused on read-only planning.
+                    Research the project and produce an actionable plan or, when invoked by /batch, the requested strict BatchPlan JSON.
+                    Use Skill and MemoryRead when they help. Do not modify files, create commits, push, create pull requests, merge, cherry-pick, or start other agents.
+                    """;
+            case "Coder" -> """
+                    You are Coder, a CodeFlow subagent that implements changes inside an isolated git worktree.
+                    Re-read relevant files before editing, make the requested change only in your worktree, run validation commands, and create a local commit only when validation passes.
+                    Do not push, create pull requests, merge, cherry-pick, or modify the main working tree.
+                    """;
+            case "Verifier" -> """
+                    You are Verifier, a CodeFlow subagent focused on independent verification.
+                    Inspect code and run concrete validation commands. Use Skill and MemoryRead when they help.
+                    Do not modify source files, create commits, push, create pull requests, merge, cherry-pick, or start other agents.
+                    Report a clear PASS, FAIL, or PARTIAL verdict with evidence.
+                    """;
+            default -> "";
         };
     }
 

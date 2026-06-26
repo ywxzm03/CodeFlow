@@ -37,16 +37,18 @@ final class AgentResultParser {
         String commit = fields.getOrDefault("COMMIT", "none").trim();
         String summary = fields.getOrDefault("SUMMARY", "").trim();
         String tests = fields.getOrDefault("TESTS", "").trim();
+        String verdict = fields.getOrDefault("VERDICT", "").trim().toUpperCase(Locale.ROOT);
         String failureReason = fields.getOrDefault("FAILURE_REASON", "").trim();
         String branch = fields.getOrDefault("BRANCH", expectedBranch).trim();
 
         boolean success = "success".equals(statusText)
                 && !commit.isBlank()
                 && !"none".equalsIgnoreCase(commit)
-                && !"null".equalsIgnoreCase(commit);
+                && !"null".equalsIgnoreCase(commit)
+                && "PASS".equals(verdict);
         AgentResult.Status status = success ? AgentResult.Status.SUCCESS : AgentResult.Status.FAILED;
         if (!success && failureReason.isBlank()) {
-            failureReason = "Coder did not report success with a commit";
+            failureReason = "Coder did not report success with a commit and VERDICT: PASS";
         }
 
         return new AgentResult(
@@ -59,7 +61,7 @@ final class AgentResultParser {
                 branch,
                 commit,
                 tests,
-                "",
+                verdict,
                 summary,
                 failureReason,
                 worktreePath

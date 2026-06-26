@@ -55,6 +55,7 @@ public class QueryEngine {
     private final CompactionManager compactionManager;
     private final SkillStore skillStore;
     private final ToolExecutionContext toolExecutionContext;
+    private final String roleSystemPrompt;
 
     public QueryEngine(
             LLMClient llmClient,
@@ -130,6 +131,34 @@ public class QueryEngine {
             SkillStore skillStore,
             ToolExecutionContext toolExecutionContext
     ) {
+        this(
+                llmClient,
+                tools,
+                maxIterations,
+                toolPermissionManager,
+                preToolUseHandler,
+                stopHookHandler,
+                memoryContextProvider,
+                compactionManager,
+                skillStore,
+                toolExecutionContext,
+                ""
+        );
+    }
+
+    public QueryEngine(
+            LLMClient llmClient,
+            List<Tool> tools,
+            int maxIterations,
+            ToolPermissionManager toolPermissionManager,
+            PreToolUseHandler preToolUseHandler,
+            StopHookHandler stopHookHandler,
+            MemoryContextProvider memoryContextProvider,
+            CompactionManager compactionManager,
+            SkillStore skillStore,
+            ToolExecutionContext toolExecutionContext,
+            String roleSystemPrompt
+    ) {
         this.llmClient = Objects.requireNonNull(llmClient, "llmClient must not be null");
         this.tools = Objects.requireNonNull(tools, "tools must not be null");
         this.maxIterations = maxIterations;
@@ -140,6 +169,7 @@ public class QueryEngine {
         this.compactionManager = compactionManager;
         this.skillStore = skillStore;
         this.toolExecutionContext = toolExecutionContext == null ? ToolExecutionContext.defaultContext() : toolExecutionContext;
+        this.roleSystemPrompt = roleSystemPrompt == null ? "" : roleSystemPrompt.strip();
     }
 
     /**
@@ -196,9 +226,13 @@ public class QueryEngine {
     }
 
     private String systemPrompt() {
-        String prompt = memoryContextProvider == null
-                ? SYSTEM_PROMPT
-                : memoryContextProvider.buildSystemPrompt(SYSTEM_PROMPT);
+        String prompt = SYSTEM_PROMPT;
+        if (!roleSystemPrompt.isBlank()) {
+            prompt = prompt + "\n\n### Subagent Role\n" + roleSystemPrompt;
+        }
+        if (memoryContextProvider != null) {
+            prompt = memoryContextProvider.buildSystemPrompt(prompt);
+        }
         if (skillStore == null) {
             return prompt;
         }

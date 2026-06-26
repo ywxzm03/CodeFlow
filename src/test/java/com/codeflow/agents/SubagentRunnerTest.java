@@ -37,7 +37,8 @@ class SubagentRunnerTest {
 
         runner.runPlanner("make a plan", null);
 
-        assertEquals(List.of("Read", "Grep", "Glob", "Bash"), client.lastToolNames);
+        assertEquals(List.of("Read", "Grep", "Glob", "Bash", "Skill", "MemoryRead"), client.lastToolNames);
+        assertTrue(client.lastSystemPrompt.contains("You are Planner"));
     }
 
     @Test
@@ -47,7 +48,31 @@ class SubagentRunnerTest {
 
         runner.runExplorer("search code", null);
 
-        assertEquals(List.of("Read", "Grep", "Glob", "Bash"), client.lastToolNames);
+        assertEquals(List.of("Read", "Grep", "Glob", "Bash", "Skill", "MemoryRead"), client.lastToolNames);
+        assertTrue(client.lastSystemPrompt.contains("You are Explorer"));
+    }
+
+    @Test
+    void verifierReceivesVerifierSystemPromptAndReadOnlyMemoryTools() {
+        CapturingClient client = new CapturingClient("""
+                STATUS: success
+                VERDICT: PASS
+                COMMANDS: ./gradlew test
+                SUMMARY: ok
+                FAILURE_REASON: none
+                """);
+        SubagentRunner runner = new SubagentRunner(client, allTools(), 1, null, tempDir);
+        BackgroundTaskRegistry registry = new BackgroundTaskRegistry(tempDir);
+
+        runner.runForeground(
+                new AgentInvocation(AgentDefinition.VERIFIER, "manual", "manual", "verify", "Verify", false, "", ""),
+                registry,
+                new WorktreeService(tempDir),
+                null
+        );
+
+        assertEquals(List.of("Read", "Grep", "Glob", "Bash", "Skill", "MemoryRead"), client.lastToolNames);
+        assertTrue(client.lastSystemPrompt.contains("You are Verifier"));
     }
 
     @Test
@@ -60,6 +85,7 @@ class SubagentRunnerTest {
         CapturingClient client = new CapturingClient("""
                 STATUS: success
                 COMMIT: abc123
+                VERDICT: PASS
                 TESTS: ./gradlew test PASS
                 SUMMARY: changed worker files
                 FAILURE_REASON: none
@@ -82,8 +108,10 @@ class SubagentRunnerTest {
 
         assertEquals(BackgroundAgentTask.Status.SUCCESS, snapshot.status());
         assertEquals("abc123", snapshot.commitSha());
+        assertEquals("PASS", snapshot.verdict());
         assertTrue(Files.isDirectory(snapshot.worktreePath()));
         assertTrue(snapshot.branchName().startsWith("codeflow-agent-"));
+        assertTrue(client.lastSystemPrompt.contains("You are Coder"));
     }
 
     private static List<Tool> allTools() {
@@ -93,7 +121,9 @@ class SubagentRunnerTest {
                 new EditTool(),
                 new BashTool(),
                 new GrepTool(),
-                new GlobTool()
+                new GlobTool(),
+                new NamedTool("Skill"),
+                new NamedTool("MemoryRead")
         );
     }
 
@@ -130,6 +160,7 @@ class SubagentRunnerTest {
     private static final class CapturingClient implements LLMClient {
         private final String response;
         private List<String> lastToolNames = List.of();
+        private String lastSystemPrompt = "";
 
         private CapturingClient(String response) {
             this.response = response;
@@ -137,18 +168,37 @@ class SubagentRunnerTest {
 
         @Override
         public LLMResponse call(String systemPrompt, List<Message> messages, List<Tool> tools) {
+            lastSystemPrompt = systemPrompt;
             lastToolNames = tools.stream().map(Tool::name).toList();
             return new LLMResponse(response, List.of(), null);
         }
 
         @Override
         public Flux<StreamEvent> callStreaming(String systemPrompt, List<Message> messages, List<Tool> tools) {
+            lastSystemPrompt = systemPrompt;
             lastToolNames = tools.stream().map(Tool::name).toList();
             return Flux.just(new StreamEvent.TextDelta(response));
         }
 
         @Override
         public void setModel(String model) {
+        }
+    }
+
+    private record NamedTool(String name) implements Tool {
+        @Override
+        public String description() {
+            return name + " test tool";
+        }
+
+        @Override
+        public String inputSchema() {
+            return "{}";
+        }
+
+        @Override
+        public ToolExecutionResult execute(String input) {
+            return ToolExecutionResult.success("");
         }
     }
 }
