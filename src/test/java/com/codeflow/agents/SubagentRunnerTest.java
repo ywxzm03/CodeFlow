@@ -114,6 +114,85 @@ class SubagentRunnerTest {
         assertTrue(client.lastSystemPrompt.contains("You are Coder"));
     }
 
+    @Test
+    void coderCompletionEnqueuesNotification() throws Exception {
+        initRepo(tempDir);
+        Files.writeString(tempDir.resolve("README.md"), "hello\n");
+        git(tempDir, "add", "README.md");
+        git(tempDir, "commit", "-m", "initial");
+
+        CapturingClient client = new CapturingClient("""
+                STATUS: success
+                COMMIT: abc123
+                VERDICT: PASS
+                TESTS: ./gradlew test PASS
+                SUMMARY: changed worker files
+                FAILURE_REASON: none
+                """);
+        AgentNotificationQueue notificationQueue = new AgentNotificationQueue();
+        SubagentRunner runner = new SubagentRunner(client, allTools(), 1, null, tempDir, notificationQueue);
+        BackgroundTaskRegistry registry = new BackgroundTaskRegistry(tempDir);
+        WorktreeService worktreeService = new WorktreeService(tempDir);
+        var executor = Executors.newSingleThreadExecutor();
+
+        BackgroundAgentTask task = runner.launchCoder(
+                new AgentInvocation(AgentDefinition.CODER, "batch-1", "unit-1", "do work", "Unit 1"),
+                registry,
+                worktreeService,
+                executor
+        );
+
+        executor.shutdown();
+        assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
+        List<AgentNotification> notifications = notificationQueue.drainReady();
+
+        assertEquals(1, notifications.size());
+        AgentNotification notification = notifications.getFirst();
+        assertEquals(task.agentId(), notification.agentId());
+        assertEquals("Coder", notification.agentType());
+        assertEquals("batch-1", notification.batchId());
+        assertEquals("unit-1", notification.unitId());
+        assertEquals("Unit 1", notification.displayName());
+        assertEquals(BackgroundAgentTask.Status.SUCCESS, notification.status());
+        assertEquals("abc123", notification.commitSha());
+        assertEquals("PASS", notification.verdict());
+        assertEquals("changed worker files", notification.resultSummary());
+        assertTrue(Files.isDirectory(notification.worktreePath()));
+    }
+
+    @Test
+    void readOnlyBackgroundCompletionEnqueuesNotification() throws Exception {
+        CapturingClient client = new CapturingClient("""
+                STATUS: success
+                FINDINGS: found entrypoint
+                SUMMARY: found entrypoint
+                FAILURE_REASON: none
+                """);
+        AgentNotificationQueue notificationQueue = new AgentNotificationQueue();
+        SubagentRunner runner = new SubagentRunner(client, allTools(), 1, null, tempDir, notificationQueue);
+        BackgroundTaskRegistry registry = new BackgroundTaskRegistry(tempDir);
+        var executor = Executors.newSingleThreadExecutor();
+
+        BackgroundAgentTask task = runner.launchBackground(
+                new AgentInvocation(AgentDefinition.EXPLORER, "manual", "manual", "search", "Search entrypoint", true, "", ""),
+                registry,
+                new WorktreeService(tempDir),
+                executor
+        );
+
+        executor.shutdown();
+        assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
+        List<AgentNotification> notifications = notificationQueue.drainReady();
+
+        assertEquals(1, notifications.size());
+        AgentNotification notification = notifications.getFirst();
+        assertEquals(task.agentId(), notification.agentId());
+        assertEquals("Explorer", notification.agentType());
+        assertEquals("Search entrypoint", notification.displayName());
+        assertEquals(BackgroundAgentTask.Status.SUCCESS, notification.status());
+        assertEquals("found entrypoint", notification.resultSummary());
+    }
+
     private static List<Tool> allTools() {
         return List.of(
                 new ReadTool(),

@@ -35,6 +35,7 @@ public final class SubagentRunner {
     private final int maxIterations;
     private final SkillStore skillStore;
     private final Path projectRoot;
+    private final AgentNotificationQueue notificationQueue;
 
     public SubagentRunner(
             LLMClient llmClient,
@@ -52,6 +53,17 @@ public final class SubagentRunner {
             SkillStore skillStore,
             Path projectRoot
     ) {
+        this(llmClient, tools, maxIterations, skillStore, projectRoot, null);
+    }
+
+    public SubagentRunner(
+            LLMClient llmClient,
+            List<Tool> tools,
+            int maxIterations,
+            SkillStore skillStore,
+            Path projectRoot,
+            AgentNotificationQueue notificationQueue
+    ) {
         this.llmClient = Objects.requireNonNull(llmClient, "llmClient must not be null");
         this.tools = List.copyOf(Objects.requireNonNull(tools, "tools must not be null"));
         this.maxIterations = maxIterations;
@@ -59,6 +71,7 @@ public final class SubagentRunner {
         this.projectRoot = (projectRoot == null ? Path.of(System.getProperty("user.dir")) : projectRoot)
                 .toAbsolutePath()
                 .normalize();
+        this.notificationQueue = notificationQueue;
     }
 
     /**
@@ -208,6 +221,7 @@ public final class SubagentRunner {
             default -> {
                 task.markFailed("Unknown subagent_type: " + invocation.agent().type());
                 registry.persist(task);
+                notifyCompletion(task);
             }
         }
     }
@@ -237,6 +251,7 @@ public final class SubagentRunner {
             if (queryResult.stopReason() == QueryEngine.QueryResult.StopReason.USER_CANCELLED || task.cancellationToken().isCancelled()) {
                 task.cancel();
                 registry.persist(task);
+                notifyCompletion(task);
                 return;
             }
             AgentResult result = AgentResultParser.parseGeneric(
@@ -253,10 +268,12 @@ public final class SubagentRunner {
                 task.markFailed(result.failureReason());
             }
             registry.persist(task);
+            notifyCompletion(task);
         } catch (Exception e) {
             task.markFailed(e.getMessage());
             registry.appendLog(task.agentId(), "ERROR: " + e.getMessage() + System.lineSeparator());
             registry.persist(task);
+            notifyCompletion(task);
         }
     }
 
@@ -290,6 +307,7 @@ public final class SubagentRunner {
             if (queryResult.stopReason() == QueryEngine.QueryResult.StopReason.USER_CANCELLED || task.cancellationToken().isCancelled()) {
                 task.cancel();
                 registry.persist(task);
+                notifyCompletion(task);
                 return;
             }
 
@@ -304,6 +322,7 @@ public final class SubagentRunner {
             if (result.status() == AgentResult.Status.SUCCESS) {
                 task.markSuccess(result.commitSha(), result.resultSummary(), result.testSummary(), result.verdict());
                 registry.persist(task);
+                notifyCompletion(task);
                 if (verifierInvocation != null) {
                     // Verifier 通过 Coder 的 agentId 定位 worktree，并在其中验证。
                     AgentInvocation targetedVerifier = new AgentInvocation(
@@ -330,12 +349,15 @@ public final class SubagentRunner {
                 }
             } else {
                 task.markFailed(result.failureReason());
+                registry.persist(task);
+                notifyCompletion(task);
+                return;
             }
-            registry.persist(task);
         } catch (Exception e) {
             task.markFailed(e.getMessage());
             registry.appendLog(task.agentId(), "ERROR: " + e.getMessage() + System.lineSeparator());
             registry.persist(task);
+            notifyCompletion(task);
         }
     }
 
@@ -366,6 +388,7 @@ public final class SubagentRunner {
             if (queryResult.stopReason() == QueryEngine.QueryResult.StopReason.USER_CANCELLED || task.cancellationToken().isCancelled()) {
                 task.cancel();
                 registry.persist(task);
+                notifyCompletion(task);
                 return;
             }
             AgentResult result = AgentResultParser.parseGeneric(
@@ -382,10 +405,23 @@ public final class SubagentRunner {
                 task.markFailed(result.failureReason());
             }
             registry.persist(task);
+            notifyCompletion(task);
         } catch (Exception e) {
             task.markFailed(e.getMessage());
             registry.appendLog(task.agentId(), "ERROR: " + e.getMessage() + System.lineSeparator());
             registry.persist(task);
+            notifyCompletion(task);
+        }
+    }
+
+    private void notifyCompletion(BackgroundAgentTask task) {
+        if (notificationQueue == null) {
+            return;
+        }
+        try {
+            notificationQueue.enqueue(AgentNotification.fromSnapshot(task.snapshot()));
+        } catch (RuntimeException ignored) {
+            // 通知只是附加反馈，不能反向改变 worker 终态。
         }
     }
 
